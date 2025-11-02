@@ -87,6 +87,7 @@
 
 
 
+
   
   - [ ] 5.2 Integrate levels into signal reasoning
     - Include nearest key levels in signal alerts
@@ -122,29 +123,38 @@
     - Calculate entry, stop (tight), target (1.5x ATR)
     - _Requirements: 3.2, 3.3, 3.4, 3.5_
   
-  - [ ] 7.3 Implement EMA Cloud Breakout strategy
+  - [x] 7.3 Implement EMA Cloud Breakout strategy
+
     - Check EMA(20) and EMA(50) alignment
+
     - Validate price vs VWAP for institutional bias
     - Detect range breakout with volume confirmation
     - Validate RSI 25-75 range
     - Calculate entry, stop (1.2x ATR), target (1.5x ATR)
     - _Requirements: 4.1, 4.2, 4.3, 4.4, 4.5_
   
+
   - [ ] 7.4 Implement Mean Reversion strategy
     - Detect overextension (> 1.5x ATR from VWAP)
     - Check RSI extremes (> 75 or < 25)
     - Wait for reversal candle (pin bar, doji, engulfing)
     - Validate volume confirms reversal
+
     - Set target at VWAP for mean reversion
+
     - _Requirements: 5.1, 5.2, 5.3, 5.4, 5.5_
   
   - [ ] 7.5 Generate Gold-specific reasoning
     - Include strategy name and session context
     - Explain Asian range if applicable
     - List all confluence factors with details
+
     - Add key level proximity information
     - Explain why to enter NOW with institutional context
     - _Requirements: 6.1, 6.2, 6.3, 6.4, 6.5_
+
+
+
 
 - [ ] 8. Implement Trade Management for Gold
   - [ ] 8.1 Extend TradeTracker for Gold-specific features
@@ -153,27 +163,33 @@
     - Check spread widening during trade
     - Add session-end warnings
     - _Requirements: 7.1, 7.2, 7.3, 7.4, 7.5_
+
   
   - [ ] 8.2 Add Gold-specific trade updates
     - Breakeven notification with spread check
     - Target approach with session time remaining
     - Stop warning with spread status
     - Session-end warning if trade still open
+
     - _Requirements: 7.1, 7.2, 7.3, 7.4, 7.5_
 
 - [ ] 9. Implement Dynamic Risk Management
-  - [ ] 9.1 Create RiskCalculator for Gold
+  - [x] 9.1 Create RiskCalculator for Gold
+
     - Calculate stop-loss as entry ± (1.2 × ATR)
+
     - Calculate take-profit as entry ± (1.5 × ATR) for breakouts
     - Calculate take-profit as VWAP for mean reversion
     - Calculate risk-reward ratio
     - _Requirements: 9.1, 9.2, 9.3, 9.4_
   
+
   - [ ] 9.2 Add position sizing recommendations
     - Calculate position size for 0.5% account risk
     - Include in signal alerts
     - Adjust for spread cost
     - _Requirements: 9.5_
+
 
 - [ ] 10. Create main Gold scanner application
   - [ ] 10.1 Implement main orchestrator
