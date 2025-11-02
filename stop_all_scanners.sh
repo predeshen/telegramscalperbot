@@ -48,6 +48,18 @@ if screen -list | grep -q "xau_swing"; then
     ((stopped_count++))
 fi
 
+if screen -list | grep -q "us30_scalp"; then
+    echo "Stopping US30 Scalping Scanner..."
+    screen -X -S us30_scalp quit
+    ((stopped_count++))
+fi
+
+if screen -list | grep -q "us30_swing"; then
+    echo "Stopping US30 Swing Scanner..."
+    screen -X -S us30_swing quit
+    ((stopped_count++))
+fi
+
 if screen -list | grep -q "scanner_monitor"; then
     echo "Stopping Health Monitor..."
     screen -X -S scanner_monitor quit

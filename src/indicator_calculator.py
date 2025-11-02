@@ -160,12 +160,92 @@ class IndicatorCalculator:
             return pd.Series(index=data.index, dtype=float)
     
     @staticmethod
+    def calculate_stochastic(data: pd.DataFrame, k_period: int = 14, 
+                           d_period: int = 3, smooth_k: int = 3) -> tuple:
+        """
+        Calculate Stochastic Oscillator (%K and %D).
+        
+        Args:
+            data: DataFrame with OHLC data
+            k_period: Period for %K calculation
+            d_period: Period for %D (signal line) calculation
+            smooth_k: Smoothing period for %K
+            
+        Returns:
+            Tuple of (stoch_k, stoch_d) Series
+        """
+        try:
+            # Calculate raw %K
+            lowest_low = data['low'].rolling(window=k_period).min()
+            highest_high = data['high'].rolling(window=k_period).max()
+            
+            raw_k = 100 * (data['close'] - lowest_low) / (highest_high - lowest_low)
+            
+            # Smooth %K
+            stoch_k = raw_k.rolling(window=smooth_k).mean()
+            
+            # Calculate %D (signal line)
+            stoch_d = stoch_k.rolling(window=d_period).mean()
+            
+            return stoch_k, stoch_d
+            
+        except Exception as e:
+            logger.error(f"Error calculating Stochastic({k_period},{d_period},{smooth_k}): {e}")
+            return pd.Series(index=data.index, dtype=float), pd.Series(index=data.index, dtype=float)
+    
+    @staticmethod
+    def calculate_macd(data: pd.DataFrame, fast_period: int = 12, 
+                      slow_period: int = 26, signal_period: int = 9,
+                      column: str = 'close') -> tuple:
+        """
+        Calculate MACD (Moving Average Convergence Divergence).
+        
+        Args:
+            data: DataFrame with price data
+            fast_period: Fast EMA period
+            slow_period: Slow EMA period
+            signal_period: Signal line EMA period
+            column: Column name to calculate MACD on
+            
+        Returns:
+            Tuple of (macd, signal, histogram) Series
+        """
+        try:
+            # Calculate fast and slow EMAs
+            fast_ema = data[column].ewm(span=fast_period, adjust=False).mean()
+            slow_ema = data[column].ewm(span=slow_period, adjust=False).mean()
+            
+            # MACD line
+            macd = fast_ema - slow_ema
+            
+            # Signal line
+            signal = macd.ewm(span=signal_period, adjust=False).mean()
+            
+            # Histogram
+            histogram = macd - signal
+            
+            return macd, signal, histogram
+            
+        except Exception as e:
+            logger.error(f"Error calculating MACD({fast_period},{slow_period},{signal_period}): {e}")
+            empty = pd.Series(index=data.index, dtype=float)
+            return empty, empty, empty
+    
+    @staticmethod
     def calculate_all_indicators(
         data: pd.DataFrame,
         ema_periods: list = [9, 21, 50, 100, 200],
         atr_period: int = 14,
         rsi_period: int = 6,
-        volume_ma_period: int = 20
+        volume_ma_period: int = 20,
+        include_stochastic: bool = False,
+        stoch_k_period: int = 14,
+        stoch_d_period: int = 3,
+        stoch_smooth: int = 3,
+        include_macd: bool = False,
+        macd_fast: int = 12,
+        macd_slow: int = 26,
+        macd_signal: int = 9
     ) -> pd.DataFrame:
         """
         Calculate all indicators and append to DataFrame.
@@ -176,6 +256,14 @@ class IndicatorCalculator:
             atr_period: ATR period
             rsi_period: RSI period
             volume_ma_period: Volume MA period
+            include_stochastic: Whether to calculate Stochastic
+            stoch_k_period: Stochastic %K period
+            stoch_d_period: Stochastic %D period
+            stoch_smooth: Stochastic smoothing period
+            include_macd: Whether to calculate MACD
+            macd_fast: MACD fast period
+            macd_slow: MACD slow period
+            macd_signal: MACD signal period
             
         Returns:
             DataFrame with all indicator columns added
@@ -202,6 +290,23 @@ class IndicatorCalculator:
             
             # Calculate Volume MA
             result['volume_ma'] = IndicatorCalculator.calculate_volume_ma(data, volume_ma_period)
+            
+            # Calculate Stochastic (optional)
+            if include_stochastic:
+                stoch_k, stoch_d = IndicatorCalculator.calculate_stochastic(
+                    data, stoch_k_period, stoch_d_period, stoch_smooth
+                )
+                result['stoch_k'] = stoch_k
+                result['stoch_d'] = stoch_d
+            
+            # Calculate MACD (optional)
+            if include_macd:
+                macd, signal, histogram = IndicatorCalculator.calculate_macd(
+                    data, macd_fast, macd_slow, macd_signal
+                )
+                result['macd'] = macd
+                result['macd_signal'] = signal
+                result['macd_histogram'] = histogram
             
             # Drop rows with NaN values in critical indicators
             # (first few rows will have NaN due to indicator warmup)
