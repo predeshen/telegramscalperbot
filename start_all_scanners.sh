@@ -86,11 +86,18 @@ start_scanner "BTC Scalping Scanner" "main.py" "btc_scanner"
 # Start BTC Swing Scanner (15m/1h/4h/1d)
 start_scanner "BTC Swing Scanner" "main_swing.py" "btc_swing"
 
-# Start XAU/USD Gold Scanner (when ready)
+# Start XAU/USD Gold Scalping Scanner (1m/5m)
 if [ -f "xauusd_scanner/main_gold.py" ]; then
-    start_scanner "XAU/USD Gold Scanner" "xauusd_scanner/main_gold.py" "xau_scanner"
+    start_scanner "XAU/USD Gold Scalping Scanner" "xauusd_scanner/main_gold.py" "xau_scalp"
 else
-    echo "⏳ XAU/USD scanner not yet available (still in development)"
+    echo "⏳ XAU/USD scalping scanner not yet available"
+fi
+
+# Start XAU/USD Gold Swing Scanner (15m/1h/4h/1d)
+if [ -f "xauusd_scanner/main_gold_swing.py" ]; then
+    start_scanner "XAU/USD Gold Swing Scanner" "xauusd_scanner/main_gold_swing.py" "xau_swing"
+else
+    echo "⏳ XAU/USD swing scanner not yet available"
 fi
 
 echo ""
@@ -99,24 +106,26 @@ echo "✅ Deployment Complete"
 echo "=========================================="
 echo ""
 echo "Active Scanners:"
-screen -list | grep -E "(btc_scanner|btc_swing|xau_scanner)" || echo "  None running"
+screen -list | grep -E "(btc_scanner|btc_swing|xau_scalp|xau_swing)" || echo "  None running"
 echo ""
 echo "Commands:"
-echo "  View all:     screen -list"
-echo "  Attach BTC:   screen -r btc_scanner"
-echo "  Attach Swing: screen -r btc_swing"
-echo "  Attach Gold:  screen -r xau_scanner"
-echo "  Detach:       Ctrl+A, then D"
-echo "  Stop all:     ./stop_all_scanners.sh"
+echo "  View all:        screen -list"
+echo "  Attach BTC Scalp: screen -r btc_scanner"
+echo "  Attach BTC Swing: screen -r btc_swing"
+echo "  Attach Gold Scalp: screen -r xau_scalp"
+echo "  Attach Gold Swing: screen -r xau_swing"
+echo "  Detach:          Ctrl+A, then D"
+echo "  Stop all:        ./stop_all_scanners.sh"
 echo ""
 echo "Logs:"
-echo "  BTC Scalp:    tail -f logs/scanner.log"
-echo "  BTC Swing:    tail -f logs/scanner_swing.log"
-echo "  XAU/USD:      tail -f logs/scanner_gold.log"
+echo "  BTC Scalp:       tail -f logs/scanner.log"
+echo "  BTC Swing:       tail -f logs/scanner_swing.log"
+echo "  Gold Scalp:      tail -f logs/gold_scanner.log"
+echo "  Gold Swing:      tail -f logs/gold_swing_scanner.log"
 echo ""
 
 # Send summary notification
-send_telegram "📊 <b>All Scanners Deployed</b>%0A%0A✅ BTC Scalping (1m/5m)%0A✅ BTC Swing (15m/1h/4h/1d)%0A%0AMonitoring active. You'll receive alerts for all signals."
+send_telegram "📊 <b>All Scanners Deployed</b>%0A%0A✅ BTC Scalping (1m/5m)%0A✅ BTC Swing (15m/1h/4h/1d)%0A✅ Gold Scalping (1m/5m)%0A✅ Gold Swing (15m/1h/4h/1d)%0A%0AMonitoring active. You'll receive alerts for all signals."
 
 # Optional: Start health monitoring in background
 if [ "$1" == "--monitor" ]; then
@@ -140,13 +149,18 @@ if [ "$1" == "--monitor" ]; then
                     -d parse_mode='HTML' > /dev/null
             fi
             
-            if screen -list | grep -q 'xau_scanner'; then
-                if ! screen -list | grep -q 'xau_scanner'; then
-                    curl -s -X POST 'https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage' \
-                        -d chat_id='${TELEGRAM_CHAT_ID}' \
-                        -d text='⚠️ <b>XAU/USD Scanner Stopped</b>%0A%0APlease restart: screen -r xau_scanner' \
-                        -d parse_mode='HTML' > /dev/null
-                fi
+            if ! screen -list | grep -q 'xau_scalp'; then
+                curl -s -X POST 'https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage' \
+                    -d chat_id='${TELEGRAM_CHAT_ID}' \
+                    -d text='⚠️ <b>Gold Scalping Scanner Stopped</b>%0A%0APlease restart: screen -r xau_scalp' \
+                    -d parse_mode='HTML' > /dev/null
+            fi
+            
+            if ! screen -list | grep -q 'xau_swing'; then
+                curl -s -X POST 'https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage' \
+                    -d chat_id='${TELEGRAM_CHAT_ID}' \
+                    -d text='⚠️ <b>Gold Swing Scanner Stopped</b>%0A%0APlease restart: screen -r xau_swing' \
+                    -d parse_mode='HTML' > /dev/null
             fi
         done
     "

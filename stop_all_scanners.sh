@@ -36,9 +36,15 @@ if screen -list | grep -q "btc_swing"; then
     ((stopped_count++))
 fi
 
-if screen -list | grep -q "xau_scanner"; then
-    echo "Stopping XAU/USD Scanner..."
-    screen -X -S xau_scanner quit
+if screen -list | grep -q "xau_scalp"; then
+    echo "Stopping XAU/USD Scalping Scanner..."
+    screen -X -S xau_scalp quit
+    ((stopped_count++))
+fi
+
+if screen -list | grep -q "xau_swing"; then
+    echo "Stopping XAU/USD Swing Scanner..."
+    screen -X -S xau_swing quit
     ((stopped_count++))
 fi
 
