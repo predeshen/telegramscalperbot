@@ -1,6 +1,6 @@
 {
   "exchange": {
-    "name": "binance",
+    "name": "kraken",
     "symbol": "BTC/USDT",
     "timeframes": ["1m", "5m"]
   },

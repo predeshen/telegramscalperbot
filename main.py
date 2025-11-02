@@ -119,14 +119,9 @@ class BTCScalpingScanner:
                 self.market_client.get_latest_candles(timeframe, 200)
                 logger.info(f"Loaded {timeframe} data")
             
-            # Start WebSocket streamer
-            logger.info("Starting WebSocket streamer...")
-            self.ws_streamer = BinanceWebSocketStreamer(
-                symbol=self.config.exchange.symbol,
-                timeframes=self.config.exchange.timeframes,
-                on_candle_callback=self._on_candle_update
-            )
-            self.ws_streamer.start()
+            # Use polling mode instead of WebSocket for better compatibility
+            logger.info("Using polling mode for data updates (more reliable across exchanges)...")
+            self.ws_streamer = None  # Disabled for compatibility
             
             # Start health monitoring thread
             self.health_thread = threading.Thread(target=self._health_monitoring_loop, daemon=True)
@@ -137,9 +132,63 @@ class BTCScalpingScanner:
             
             logger.info("Scanner is now running. Press Ctrl+C to stop.")
             
-            # Main loop - just wait for shutdown
+            # Main loop - poll for new data every 10 seconds
+            logger.info("Starting main polling loop (10-second intervals)...")
             while self.running and not self.shutdown_event.is_set():
-                time.sleep(1)
+                try:
+                    # Fetch latest data for each timeframe
+                    for timeframe in self.config.exchange.timeframes:
+                        df = self.market_client.get_latest_candles(timeframe, 200)
+                        
+                        if not df.empty:
+                            # Update health monitor
+                            self.health_monitor.update_data_timestamp(df.iloc[-1]['timestamp'])
+                            
+                            # Calculate indicators
+                            data_with_indicators = self.indicator_calculator.calculate_all_indicators(
+                                df,
+                                ema_periods=[
+                                    self.config.indicators.ema_fast,
+                                    self.config.indicators.ema_slow,
+                                    self.config.indicators.ema_trend,
+                                    100,
+                                    200
+                                ],
+                                atr_period=self.config.indicators.atr_period,
+                                rsi_period=self.config.indicators.rsi_period,
+                                volume_ma_period=self.config.indicators.volume_ma_period
+                            )
+                            
+                            if not data_with_indicators.empty:
+                                # Detect signals
+                                signal = self.signal_detector.detect_signals(data_with_indicators, timeframe)
+                                
+                                if signal:
+                                    logger.info(f"🎯 Signal detected: {signal.signal_type} on {timeframe}")
+                                    
+                                    # Record signal
+                                    self.health_monitor.record_signal(signal.signal_type)
+                                    
+                                    # Send alerts
+                                    alert_success = self.alerter.send_signal_alert(signal)
+                                    
+                                    if alert_success:
+                                        logger.info("Alert sent successfully")
+                                    else:
+                                        logger.error("Failed to send alert")
+                                    
+                                    # Update email success rate
+                                    if hasattr(self.alerter, 'email_alerter') and self.alerter.email_alerter:
+                                        rate = self.alerter.email_alerter.get_success_rate()
+                                        self.health_monitor.set_email_success_rate(rate)
+                    
+                    # Wait 10 seconds before next poll
+                    time.sleep(10)
+                    
+                except Exception as e:
+                    logger.error(f"Error in polling loop: {e}")
+                    self.health_monitor.record_error(e)
+                    time.sleep(10)
             
         except KeyboardInterrupt:
             logger.info("Keyboard interrupt received")
@@ -158,9 +207,10 @@ class BTCScalpingScanner:
         self.running = False
         self.shutdown_event.set()
         
-        # Stop WebSocket
+        # Stop WebSocket (if enabled)
         if self.ws_streamer:
             self.ws_streamer.stop()
+            logger.info("WebSocket streamer stopped")
         
         # Close market client
         if self.market_client:

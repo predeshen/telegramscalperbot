@@ -16,6 +16,7 @@ class BinanceWebSocketStreamer:
     WebSocket client for Binance real-time kline (candlestick) streams.
     
     Connects to Binance WebSocket API and streams real-time candlestick updates.
+    Note: This is disabled by default. Use polling mode instead for better compatibility.
     """
     
     def __init__(self, symbol: str, timeframes: List[str], on_candle_callback: Callable):
