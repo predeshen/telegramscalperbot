@@ -71,8 +71,10 @@ def main():
     logger.info("Initializing components...")
     
     market_client = MarketDataClient(
-        exchange_id=config['exchange'],
-        symbol=config['symbol']
+        exchange_name=config['exchange'],
+        symbol=config['symbol'],
+        timeframes=config['timeframes'],
+        buffer_size=200
     )
     
     indicator_calc = IndicatorCalculator()
@@ -106,7 +108,7 @@ def main():
             logger.warning("Telegram credentials not found")
     
     # Initialize trade tracker
-    trade_tracker = TradeTracker()
+    trade_tracker = TradeTracker(alerter=alerter)
     
     logger.info("All components initialized successfully")
     
@@ -119,7 +121,7 @@ def main():
     logger.info("Fetching initial candlestick data...")
     candle_data = {}
     for timeframe in config['timeframes']:
-        candles = market_client.fetch_ohlcv(timeframe, limit=200)
+        candles = market_client.get_latest_candles(timeframe, count=200)
         
         # Calculate indicators
         candles['ema_9'] = indicator_calc.calculate_ema(candles, 9)
@@ -201,7 +203,7 @@ def main():
             for timeframe in config['timeframes']:
                 try:
                     # Fetch latest candles
-                    candles = market_client.fetch_ohlcv(timeframe, limit=200)
+                    candles = market_client.get_latest_candles(timeframe, count=200)
                     
                     # Calculate indicators
                     candles['ema_9'] = indicator_calc.calculate_ema(candles, 9)

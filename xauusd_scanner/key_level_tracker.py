@@ -74,7 +74,8 @@ class KeyLevelTracker:
             self.daily_open = close
             self.current_date = current_date
             
-            logger.info(f"New day: {current_date}, Previous close: {self.previous_close:.2f if self.previous_close else 'N/A'}")
+            prev_close_str = f"{self.previous_close:.2f}" if self.previous_close is not None else "N/A"
+            logger.info(f"New day: {current_date}, Previous close: {prev_close_str}")
         else:
             # Update daily levels
             if self.daily_high is None or high > self.daily_high:
