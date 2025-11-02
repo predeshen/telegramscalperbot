@@ -1,0 +1,29 @@
+{
+  "events": [
+    {
+      "date": "2025-11-07T13:30:00Z",
+      "name": "Non-Farm Payrolls (NFP)",
+      "impact": "HIGH",
+      "description": "Monthly US employment report"
+    },
+    {
+      "date": "2025-11-12T13:30:00Z",
+      "name": "Consumer Price Index (CPI)",
+      "impact": "HIGH",
+      "description": "US inflation data"
+    },
+    {
+      "date": "2025-11-19T19:00:00Z",
+      "name": "FOMC Meeting Minutes",
+      "impact": "HIGH",
+      "description": "Federal Reserve policy minutes"
+    },
+    {
+      "date": "2025-11-26T13:30:00Z",
+      "name": "GDP (Preliminary)",
+      "impact": "HIGH",
+      "description": "US economic growth data"
+    }
+  ],
+  "_instructions": "Add high-impact USD events here. Scanner will pause 30 min before and resume 15 min after each event."
+}
