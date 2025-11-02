@@ -5,7 +5,6 @@ websocket-client>=1.6.0
 # Data processing and technical indicators
 pandas>=2.0.0
 numpy>=1.24.0
-pandas-ta>=0.3.14b0
 
 # Telegram bot
 python-telegram-bot>=20.0
