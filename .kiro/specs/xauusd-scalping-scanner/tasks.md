@@ -62,21 +62,31 @@
     - Implement `is_spread_acceptable()` (< 10 pips)
     - Implement `should_pause_trading()` (> 15 pips)
     - _Requirements: 8.1, 8.2, 8.3_
+
+
+
   
   - [ ] 4.2 Add spread monitoring to signal flow
     - Check spread before generating signals
     - Include current spread in all alerts
     - Send notification when spread too wide
     - Log spread violations
+
     - _Requirements: 8.4, 8.5_
 
 - [ ] 5. Implement Key Level Tracker
-  - [ ] 5.1 Create KeyLevelTracker class
+  - [x] 5.1 Create KeyLevelTracker class
+
+
+
     - Track daily high, low, previous close
     - Generate psychological round numbers (2350, 2400, 2450, etc.)
     - Implement `get_nearest_level()` to find closest level
     - Implement `is_near_level()` with 5-pip threshold
     - _Requirements: 10.1, 10.2, 10.3_
+
+
+
   
   - [ ] 5.2 Integrate levels into signal reasoning
     - Include nearest key levels in signal alerts
@@ -84,12 +94,14 @@
     - Prefer signals that align with level bounces/breaks
     - _Requirements: 10.4, 10.5_
 
+
 - [ ] 6. Implement Strategy Selector
   - [ ] 6.1 Create StrategySelector class
     - Implement session-based strategy selection
     - Prioritize Asian Range Breakout during London open
     - Use EMA Cloud as primary during active sessions
     - Detect overextension for Mean Reversion opportunities
+
     - _Requirements: 3.1, 4.1, 5.1_
 
 - [ ] 7. Implement Gold Signal Detector
@@ -97,6 +109,7 @@
     - Extend from base SignalDetector
     - Add Gold-specific signal dataclass
     - Implement strategy routing logic
+
     - Add spread and session validation
     - _Requirements: 3.1, 4.1, 5.1_
   
@@ -104,6 +117,7 @@
     - Detect breakout above/below Asian range
     - Wait for re-test of broken level
     - Confirm with pin bar or engulfing candle
+
     - Validate volume > 1.2x average
     - Calculate entry, stop (tight), target (1.5x ATR)
     - _Requirements: 3.2, 3.3, 3.4, 3.5_
