@@ -176,6 +176,7 @@
 - [ ] 9. Implement Dynamic Risk Management
   - [x] 9.1 Create RiskCalculator for Gold
 
+
     - Calculate stop-loss as entry ± (1.2 × ATR)
 
     - Calculate take-profit as entry ± (1.5 × ATR) for breakouts

@@ -1,0 +1,47 @@
+{
+  "exchange": {
+    "name": "yfinance",
+    "symbol": "^DJI",
+    "timeframes": ["5m", "15m"]
+  },
+  "indicators": {
+    "ema_fast": 8,
+    "ema_mid": 21,
+    "ema_slow": 50,
+    "atr_period": 14,
+    "rsi_period": 14,
+    "stochastic_k": 8,
+    "stochastic_d": 3,
+    "stochastic_smooth": 3,
+    "volume_ma_period": 20
+  },
+  "signal_rules": {
+    "volume_spike_threshold": 1.5,
+    "rsi_min": 20,
+    "rsi_max": 80,
+    "stoch_oversold": 20,
+    "stoch_overbought": 80,
+    "stop_loss_points": 30,
+    "take_profit_points_quick": 30,
+    "take_profit_points_extended": 60,
+    "duplicate_time_window_minutes": 15,
+    "duplicate_price_threshold_percent": 0.3
+  },
+  "trading_hours": {
+    "ny_open_start": "14:30",
+    "ny_open_end": "17:00",
+    "comment": "Times in GMT for NY session (9:30 AM - 12:00 PM ET)"
+  },
+  "telegram": {
+    "enabled": true,
+    "bot_token": "8276571945:AAFKYdUCEd7Ct405K8BcBWWHyxZe5wGwo7M",
+    "chat_id": "8119046376"
+  },
+  "logging": {
+    "level": "INFO",
+    "file": "logs/us30_scalp_scanner.log",
+    "rotation": "daily",
+    "retention_days": 7
+  },
+  "polling_interval_seconds": 60
+}
