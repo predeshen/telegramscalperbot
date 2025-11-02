@@ -9,37 +9,55 @@
   - Create `news_events.json` template for economic calendar
   - _Requirements: 11.5_
 
-- [ ] 2. Implement Session Manager
-  - [ ] 2.1 Create SessionManager class with GMT time handling
+
+
+- [x] 2. Implement Session Manager
+
+  - [x] 2.1 Create SessionManager class with GMT time handling
+
+
     - Implement `get_current_session()` to identify Asian/London/NY
     - Implement `is_active_session()` to determine if trading allowed
     - Add session transition logging and notifications
     - _Requirements: 1.3, 1.4, 1.5_
   
-  - [ ] 2.2 Implement Asian range tracking
+
+  - [x] 2.2 Implement Asian range tracking
+
     - Track price high/low during Asian session (00:00-08:00 GMT)
     - Store Asian range at session end
     - Implement `get_asian_range()` to retrieve stored range
     - Reset range daily at Asian session start
     - _Requirements: 3.1_
 
-- [ ] 3. Implement News Calendar
-  - [ ] 3.1 Create NewsCalendar class with event management
+- [x] 3. Implement News Calendar
+
+
+  - [x] 3.1 Create NewsCalendar class with event management
+
+
+
     - Load events from JSON file
     - Implement `add_event()` for manual event addition
     - Implement `is_news_imminent()` to check 30-min window
     - Implement `should_pause_trading()` logic
     - _Requirements: 2.1, 2.2, 2.3_
+
   
   - [ ] 3.2 Add news pause/resume notifications
     - Send Telegram alert when entering news pause
     - Send Telegram alert when resuming after news
+
+
+
+
     - Log all news-related pauses with event details
     - _Requirements: 2.4, 2.5_
 
 - [ ] 4. Implement Spread Monitor
   - [ ] 4.1 Create SpreadMonitor class
     - Implement `update_spread()` to track bid-ask
+
     - Calculate spread in pips for Gold (multiply by 10)
     - Implement `is_spread_acceptable()` (< 10 pips)
     - Implement `should_pause_trading()` (> 15 pips)
