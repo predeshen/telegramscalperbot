@@ -347,7 +347,7 @@ def main():
                 interval = config.get('asian_polling_seconds', 30)
             else:
                 # Faster during active sessions
-                interval = config['polling_interval_seconds']
+                interval = config['scanner']['polling_interval_seconds']
             
             time.sleep(interval)
     
