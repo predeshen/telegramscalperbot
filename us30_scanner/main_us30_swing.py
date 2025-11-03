@@ -226,12 +226,15 @@ def main():
                                 'price': last_row['close'],
                                 'volume': last_row['volume'],
                                 'indicators': {
+                                    'ema_9': last_row.get('ema_9', None),
                                     'ema_21': last_row.get('ema_21', None),
                                     'ema_50': last_row.get('ema_50', None),
+                                    'ema_100': last_row.get('ema_100', None),
                                     'ema_200': last_row.get('ema_200', None),
                                     'rsi': last_row.get('rsi', None),
                                     'atr': last_row.get('atr', None),
-                                    'volume_ma': last_row.get('volume_ma', None)
+                                    'volume_ma': last_row.get('volume_ma', None),
+                                    'vwap': last_row.get('vwap', None)
                                 },
                                 'signal_detected': signal is not None,
                                 'signal_type': signal.signal_type if signal else None,
@@ -240,7 +243,12 @@ def main():
                                     'stop_loss': signal.stop_loss,
                                     'take_profit': signal.take_profit,
                                     'risk_reward': signal.risk_reward,
-                                    'strategy': getattr(signal, 'strategy', 'N/A')
+                                    'strategy': getattr(signal, 'strategy', 'EMA Crossover'),
+                                    'confidence': getattr(signal, 'confidence', None),
+                                    'market_bias': getattr(signal, 'market_bias', None),
+                                    'trend_direction': getattr(signal, 'trend_direction', None),
+                                    'swing_points': getattr(signal, 'swing_points', None),
+                                    'pullback_depth': getattr(signal, 'pullback_depth', None)
                                 } if signal else {}
                             }
                             excel_reporter.log_scan_result(scan_data)

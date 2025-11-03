@@ -84,13 +84,22 @@ class ExcelReporter:
             ws = wb.active
             ws.title = "Scan Results"
             
-            # Define headers
+            # Define headers - comprehensive column structure
             headers = [
+                # Basic info
                 'scan_id', 'timestamp', 'scanner', 'symbol', 'timeframe',
-                'price', 'volume', 'ema_9', 'ema_21', 'ema_50', 'ema_100', 'ema_200',
+                # Price and volume
+                'price', 'volume',
+                # Indicators
+                'ema_9', 'ema_21', 'ema_50', 'ema_100', 'ema_200',
                 'rsi', 'atr', 'volume_ma', 'vwap', 'stoch_k', 'stoch_d',
-                'signal_detected', 'signal_type', 'signal_entry', 'signal_sl',
-                'signal_tp', 'signal_rr', 'signal_strategy'
+                # Signal info
+                'signal_detected', 'signal_type', 'entry_price', 'stop_loss',
+                'take_profit', 'risk_reward', 'strategy', 'confidence', 'market_bias',
+                # XAUUSD-specific (will be empty for BTC/US30)
+                'session', 'spread_pips', 'asian_range_high', 'asian_range_low',
+                # Trend-specific (will be empty for non-trend signals)
+                'trend_direction', 'swing_points', 'pullback_depth'
             ]
             
             # Write headers
@@ -158,6 +167,7 @@ class ExcelReporter:
                 # Extract data
                 indicators = scan_data.get('indicators', {})
                 signal_details = scan_data.get('signal_details', {})
+                xauusd_specific = scan_data.get('xauusd_specific', {})
                 signal_detected = scan_data.get('signal_detected', False)
                 
                 # Update statistics
@@ -169,33 +179,57 @@ class ExcelReporter:
                     elif signal_type == 'SHORT':
                         self.short_signals += 1
                 
-                # Prepare row data
+                # Helper function to format values
+                def format_value(value, decimal_places=2):
+                    """Format numeric values or return N/A for None."""
+                    if value is None:
+                        return 'N/A'
+                    if isinstance(value, (int, float)):
+                        return round(value, decimal_places)
+                    return value
+                
+                # Prepare row data with complete fields
                 row_data = [
+                    # Basic info
                     self.scan_count,
                     scan_data.get('timestamp', datetime.now()).strftime('%Y-%m-%d %H:%M:%S'),
                     scan_data.get('scanner', self.scanner_name),
                     scan_data.get('symbol', ''),
                     scan_data.get('timeframe', ''),
-                    scan_data.get('price', None),
-                    scan_data.get('volume', None),
-                    indicators.get('ema_9', None),
-                    indicators.get('ema_21', None),
-                    indicators.get('ema_50', None),
-                    indicators.get('ema_100', None),
-                    indicators.get('ema_200', None),
-                    indicators.get('rsi', None),
-                    indicators.get('atr', None),
-                    indicators.get('volume_ma', None),
-                    indicators.get('vwap', None),
-                    indicators.get('stoch_k', None),
-                    indicators.get('stoch_d', None),
+                    # Price and volume
+                    format_value(scan_data.get('price')),
+                    format_value(scan_data.get('volume'), 0),
+                    # Indicators
+                    format_value(indicators.get('ema_9')),
+                    format_value(indicators.get('ema_21')),
+                    format_value(indicators.get('ema_50')),
+                    format_value(indicators.get('ema_100')),
+                    format_value(indicators.get('ema_200')),
+                    format_value(indicators.get('rsi'), 1),
+                    format_value(indicators.get('atr')),
+                    format_value(indicators.get('volume_ma'), 0),
+                    format_value(indicators.get('vwap')),
+                    format_value(indicators.get('stoch_k'), 1),
+                    format_value(indicators.get('stoch_d'), 1),
+                    # Signal info
                     signal_detected,
                     scan_data.get('signal_type', '') if signal_detected else '',
-                    signal_details.get('entry_price', None) if signal_detected else None,
-                    signal_details.get('stop_loss', None) if signal_detected else None,
-                    signal_details.get('take_profit', None) if signal_detected else None,
-                    signal_details.get('risk_reward', None) if signal_detected else None,
-                    signal_details.get('strategy', '') if signal_detected else ''
+                    format_value(signal_details.get('entry_price')) if signal_detected else 'N/A',
+                    format_value(signal_details.get('stop_loss')) if signal_detected else 'N/A',
+                    format_value(signal_details.get('take_profit')) if signal_detected else 'N/A',
+                    format_value(signal_details.get('risk_reward'), 2) if signal_detected else 'N/A',
+                    signal_details.get('strategy', '') if signal_detected else '',
+                    format_value(signal_details.get('confidence'), 0) if signal_detected else 'N/A',
+                    signal_details.get('market_bias', '') if signal_detected else '',
+                    # XAUUSD-specific
+                    xauusd_specific.get('session', ''),
+                    format_value(xauusd_specific.get('spread_pips'), 1),
+                    format_value(xauusd_specific.get('asian_range_high')),
+                    format_value(xauusd_specific.get('asian_range_low')),
+                    # Trend-specific
+                    signal_details.get('trend_direction', '') if signal_detected else '',
+                    format_value(signal_details.get('swing_points'), 0) if signal_detected else 'N/A',
+                    format_value(signal_details.get('pullback_depth'), 1) if signal_detected else 'N/A'
                 ]
                 
                 # Append row

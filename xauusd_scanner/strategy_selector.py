@@ -8,6 +8,7 @@ import pandas as pd
 import logging
 
 from xauusd_scanner.session_manager import SessionManager, TradingSession
+from src.trend_analyzer import TrendAnalyzer
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +18,7 @@ class GoldStrategy(Enum):
     ASIAN_RANGE_BREAKOUT = "Asian Range Breakout"
     EMA_CLOUD_BREAKOUT = "EMA Cloud Breakout"
     MEAN_REVERSION = "Mean Reversion"
+    TREND_FOLLOWING = "Trend Following"
     NO_TRADE = "No Trade"
 
 
@@ -62,7 +64,13 @@ class StrategySelector:
         
         last = data.iloc[-1]
         
-        # Priority 1: Asian Range Breakout (during London open)
+        # Priority 1: Trend Following (during strong trending markets in London/NY)
+        if current_session in [TradingSession.LONDON, TradingSession.NEW_YORK, TradingSession.OVERLAP_LONDON_NY]:
+            if self._is_strong_trend(data):
+                logger.debug("Selected: Trend Following")
+                return GoldStrategy.TREND_FOLLOWING
+        
+        # Priority 2: Asian Range Breakout (during London open)
         if current_session in [TradingSession.LONDON, TradingSession.OVERLAP_LONDON_NY]:
             asian_range = self.session_manager.get_asian_range()
             
@@ -72,12 +80,12 @@ class StrategySelector:
                     logger.debug("Selected: Asian Range Breakout")
                     return GoldStrategy.ASIAN_RANGE_BREAKOUT
         
-        # Priority 2: Mean Reversion (when overextended)
+        # Priority 3: Mean Reversion (when overextended)
         if self._is_overextended(data):
             logger.debug("Selected: Mean Reversion")
             return GoldStrategy.MEAN_REVERSION
         
-        # Priority 3: EMA Cloud Breakout (default for active sessions)
+        # Priority 4: EMA Cloud Breakout (default for active sessions)
         if current_session in [TradingSession.LONDON, TradingSession.NEW_YORK, TradingSession.OVERLAP_LONDON_NY]:
             if self._is_trending_market(data):
                 logger.debug("Selected: EMA Cloud Breakout")
@@ -92,6 +100,45 @@ class StrategySelector:
         
         # Default to EMA Cloud for active sessions
         return GoldStrategy.EMA_CLOUD_BREAKOUT
+    
+    def _is_strong_trend(self, data: pd.DataFrame) -> bool:
+        """
+        Check if market is in a strong trend (good for Trend Following).
+        
+        Args:
+            data: DataFrame with indicators
+            
+        Returns:
+            True if strong trend detected
+        """
+        try:
+            if len(data) < 50:
+                return False
+            
+            # Detect swing points
+            swing_data = TrendAnalyzer.detect_swing_points(data, lookback=5)
+            
+            # Check for uptrend or downtrend with at least 3 swing points
+            is_uptrend = TrendAnalyzer.is_uptrend(swing_data, min_swings=3)
+            is_downtrend = TrendAnalyzer.is_downtrend(swing_data, min_swings=3)
+            
+            if not (is_uptrend or is_downtrend):
+                return False
+            
+            # Verify EMA alignment
+            trend_direction = "uptrend" if is_uptrend else "downtrend"
+            if not TrendAnalyzer.is_ema_aligned(data, trend_direction):
+                return False
+            
+            # Check not consolidating
+            if TrendAnalyzer.is_consolidating(data, periods=3):
+                return False
+            
+            return True
+        
+        except Exception as e:
+            logger.error(f"Error checking strong trend: {e}")
+            return False
     
     def _is_range_breakout_setup(self, data: pd.DataFrame, asian_range: dict) -> bool:
         """
@@ -217,6 +264,7 @@ class StrategySelector:
             GoldStrategy.ASIAN_RANGE_BREAKOUT: "Trading breakout of Asian session range with re-test confirmation",
             GoldStrategy.EMA_CLOUD_BREAKOUT: "Trading EMA cloud breakouts with VWAP and volume confirmation",
             GoldStrategy.MEAN_REVERSION: "Trading reversals when price is overextended from VWAP",
+            GoldStrategy.TREND_FOLLOWING: "Trading pullbacks within established trends with swing point confirmation",
             GoldStrategy.NO_TRADE: "No trading - waiting for better conditions"
         }
         
@@ -250,6 +298,12 @@ class StrategySelector:
                 'take_profit_atr_multiplier': 1.0,  # Target VWAP
                 'volume_threshold': 1.3,
                 'requires_reversal_candle': True
+            },
+            GoldStrategy.TREND_FOLLOWING: {
+                'stop_loss_atr_multiplier': 1.5,
+                'take_profit_atr_multiplier': 2.5,  # 3.0 for strong trends
+                'volume_threshold': 1.2,
+                'requires_pullback': True
             },
             GoldStrategy.NO_TRADE: {
                 'stop_loss_atr_multiplier': 0,

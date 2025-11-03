@@ -6,6 +6,8 @@ from typing import Optional, Dict
 import pandas as pd
 import logging
 
+from src.trend_analyzer import TrendAnalyzer
+
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +27,10 @@ class Signal:
     confidence: int  # 3-5 (number of confluence factors met)
     indicators: Dict[str, float]  # Snapshot of indicator values
     reasoning: str = ""  # Detailed explanation of why this signal was generated
+    strategy: str = ""  # Strategy name (e.g., "Trend Following", "EMA Crossover")
+    trend_direction: Optional[str] = None  # "uptrend" or "downtrend" for trend signals
+    swing_points: Optional[int] = None  # Number of swing highs/lows for trend signals
+    pullback_depth: Optional[float] = None  # Pullback percentage for trend signals
     
     def to_dict(self) -> dict:
         """Convert signal to dictionary."""
@@ -118,6 +124,13 @@ class SignalDetector:
             self.signal_history.append(bearish_signal)
             logger.info(f"SHORT signal detected on {timeframe}: {bearish_signal.entry_price}")
             return bearish_signal
+        
+        # Check for trend-following signal if no crossover signal found
+        trend_signal = self._detect_trend_following(data, timeframe)
+        if trend_signal and not self._is_duplicate_signal(trend_signal):
+            self.signal_history.append(trend_signal)
+            logger.info(f"{trend_signal.signal_type} trend-following signal detected on {timeframe}: {trend_signal.entry_price}")
+            return trend_signal
         
         return None
     
@@ -363,6 +376,292 @@ class SignalDetector:
             [s for s in self.signal_history if s.timestamp > cutoff_time],
             maxlen=50
         )
+    
+    def _detect_trend_following(self, data: pd.DataFrame, timeframe: str) -> Optional[Signal]:
+        """
+        Detect trend-following signals based on swing points and pullbacks.
+        
+        Strategy:
+        1. Detect swing points to identify trend
+        2. Verify EMA alignment with trend
+        3. Wait for pullback to EMA(21)
+        4. Confirm bounce with volume
+        5. Validate RSI range
+        
+        Args:
+            data: DataFrame with OHLCV and indicators
+            timeframe: Timeframe string
+            
+        Returns:
+            Signal with strategy="Trend Following" if detected, None otherwise
+        """
+        try:
+            if len(data) < 50:
+                return None
+            
+            # Detect swing points
+            swing_data = TrendAnalyzer.detect_swing_points(data, lookback=5)
+            
+            # Check for uptrend
+            is_uptrend = TrendAnalyzer.is_uptrend(swing_data, min_swings=3)
+            is_downtrend = TrendAnalyzer.is_downtrend(swing_data, min_swings=3)
+            
+            if not (is_uptrend or is_downtrend):
+                return None
+            
+            trend_direction = "uptrend" if is_uptrend else "downtrend"
+            
+            # Check if market is consolidating (skip if ATR declining)
+            if TrendAnalyzer.is_consolidating(data, periods=3):
+                logger.debug(f"Skipping trend signal: market consolidating on {timeframe}")
+                return None
+            
+            # Verify EMA alignment
+            if not TrendAnalyzer.is_ema_aligned(data, trend_direction):
+                return None
+            
+            # Get last candles
+            last = data.iloc[-1]
+            prev = data.iloc[-2]
+            
+            # Calculate pullback depth
+            pullback_depth = TrendAnalyzer.calculate_pullback_depth(data, trend_direction)
+            
+            # Reject if pullback too deep (> 61.8%)
+            if pullback_depth > 61.8:
+                logger.debug(f"Skipping trend signal: pullback too deep ({pullback_depth:.1f}%) on {timeframe}")
+                return None
+            
+            # Check volume confirmation (at least 1.2x average)
+            if last['volume'] < (last['volume_ma'] * 1.2):
+                return None
+            
+            # Check if volume is declining (reduce confidence)
+            volume_declining = (
+                last['volume'] < prev['volume'] and
+                prev['volume'] < data.iloc[-3]['volume']
+            )
+            
+            if volume_declining:
+                logger.debug(f"Skipping trend signal: volume declining on {timeframe}")
+                return None
+            
+            # Detect pullback entry for uptrend
+            if is_uptrend:
+                # Check RSI range (40-80 for uptrends)
+                if not (40 <= last['rsi'] <= 80):
+                    return None
+                
+                # Check if price pulled back to EMA(21) and bounced
+                ema_21 = last.get('ema_21', last.get('ema_20'))
+                if pd.isna(ema_21):
+                    return None
+                
+                # Price should be near EMA(21) (within 1 ATR)
+                distance_from_ema = abs(last['close'] - ema_21)
+                if distance_from_ema > last['atr']:
+                    return None
+                
+                # Price should be bouncing up (close > open)
+                if last['close'] <= last['open']:
+                    return None
+                
+                # Generate LONG signal
+                entry_price = last['close']
+                atr = last['atr']
+                stop_loss = entry_price - (atr * 1.5)
+                
+                # Stronger trend gets larger target
+                if last['rsi'] > 60:
+                    take_profit = entry_price + (atr * 3.0)
+                else:
+                    take_profit = entry_price + (atr * 2.5)
+                
+                risk_reward = (take_profit - entry_price) / (entry_price - stop_loss)
+                
+                # Count swing points for confidence
+                total_swings = swing_data['higher_highs'] + swing_data['higher_lows']
+                
+                # Generate reasoning
+                reasoning = self._generate_trend_reasoning(
+                    "LONG", last, swing_data, pullback_depth, total_swings
+                )
+                
+                signal = Signal(
+                    timestamp=last['timestamp'],
+                    signal_type="LONG",
+                    timeframe=timeframe,
+                    entry_price=entry_price,
+                    stop_loss=stop_loss,
+                    take_profit=take_profit,
+                    atr=atr,
+                    risk_reward=risk_reward,
+                    market_bias="bullish",
+                    confidence=4,  # Trend signals are high confidence
+                    indicators={
+                        'ema_9': last.get('ema_9'),
+                        'ema_21': ema_21,
+                        'ema_50': last['ema_50'],
+                        'vwap': last.get('vwap'),
+                        'rsi': last['rsi'],
+                        'volume': last['volume'],
+                        'volume_ma': last['volume_ma']
+                    },
+                    reasoning=reasoning,
+                    strategy="Trend Following",
+                    trend_direction=trend_direction,
+                    swing_points=total_swings,
+                    pullback_depth=pullback_depth
+                )
+                
+                return signal
+            
+            # Detect pullback entry for downtrend
+            elif is_downtrend:
+                # Check RSI range (20-60 for downtrends)
+                if not (20 <= last['rsi'] <= 60):
+                    return None
+                
+                # Check if price rallied to EMA(21) and rejected
+                ema_21 = last.get('ema_21', last.get('ema_20'))
+                if pd.isna(ema_21):
+                    return None
+                
+                # Price should be near EMA(21) (within 1 ATR)
+                distance_from_ema = abs(last['close'] - ema_21)
+                if distance_from_ema > last['atr']:
+                    return None
+                
+                # Price should be rejecting down (close < open)
+                if last['close'] >= last['open']:
+                    return None
+                
+                # Generate SHORT signal
+                entry_price = last['close']
+                atr = last['atr']
+                stop_loss = entry_price + (atr * 1.5)
+                
+                # Stronger trend gets larger target
+                if last['rsi'] < 40:
+                    take_profit = entry_price - (atr * 3.0)
+                else:
+                    take_profit = entry_price - (atr * 2.5)
+                
+                risk_reward = (entry_price - take_profit) / (stop_loss - entry_price)
+                
+                # Count swing points for confidence
+                total_swings = swing_data['lower_highs'] + swing_data['lower_lows']
+                
+                # Generate reasoning
+                reasoning = self._generate_trend_reasoning(
+                    "SHORT", last, swing_data, pullback_depth, total_swings
+                )
+                
+                signal = Signal(
+                    timestamp=last['timestamp'],
+                    signal_type="SHORT",
+                    timeframe=timeframe,
+                    entry_price=entry_price,
+                    stop_loss=stop_loss,
+                    take_profit=take_profit,
+                    atr=atr,
+                    risk_reward=risk_reward,
+                    market_bias="bearish",
+                    confidence=4,  # Trend signals are high confidence
+                    indicators={
+                        'ema_9': last.get('ema_9'),
+                        'ema_21': ema_21,
+                        'ema_50': last['ema_50'],
+                        'vwap': last.get('vwap'),
+                        'rsi': last['rsi'],
+                        'volume': last['volume'],
+                        'volume_ma': last['volume_ma']
+                    },
+                    reasoning=reasoning,
+                    strategy="Trend Following",
+                    trend_direction=trend_direction,
+                    swing_points=total_swings,
+                    pullback_depth=pullback_depth
+                )
+                
+                return signal
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error in trend-following detection: {e}")
+            return None
+    
+    def _generate_trend_reasoning(self, signal_type: str, last: pd.Series,
+                                  swing_data: Dict, pullback_depth: float,
+                                  swing_points: int) -> str:
+        """
+        Generate reasoning for trend-following signals.
+        
+        Args:
+            signal_type: "LONG" or "SHORT"
+            last: Last candle data
+            swing_data: Swing point data from TrendAnalyzer
+            pullback_depth: Pullback percentage
+            swing_points: Total number of swing points
+            
+        Returns:
+            Formatted reasoning string
+        """
+        reasons = []
+        
+        # Strategy intro
+        reasons.append("🎯 STRATEGY: Trend Following")
+        
+        # Trend identification
+        if signal_type == "LONG":
+            reasons.append(f"📈 UPTREND IDENTIFIED: {swing_points} swing points detected")
+            reasons.append(f"   • Higher Highs: {swing_data['higher_highs']}")
+            reasons.append(f"   • Higher Lows: {swing_data['higher_lows']}")
+            reasons.append(f"   • Trend strength: Strong and established")
+        else:
+            reasons.append(f"📉 DOWNTREND IDENTIFIED: {swing_points} swing points detected")
+            reasons.append(f"   • Lower Highs: {swing_data['lower_highs']}")
+            reasons.append(f"   • Lower Lows: {swing_data['lower_lows']}")
+            reasons.append(f"   • Trend strength: Strong and established")
+        
+        # Pullback entry
+        ema_21 = last.get('ema_21', last.get('ema_20'))
+        if signal_type == "LONG":
+            reasons.append(f"\n🔄 PULLBACK ENTRY: Price pulled back {pullback_depth:.1f}% and bounced at EMA(21)")
+            reasons.append(f"   • EMA(21): ${ema_21:.2f} acting as dynamic support")
+            reasons.append(f"   • Pullback healthy (< 61.8%), trend intact")
+        else:
+            reasons.append(f"\n🔄 RALLY REJECTION: Price rallied {pullback_depth:.1f}% and rejected at EMA(21)")
+            reasons.append(f"   • EMA(21): ${ema_21:.2f} acting as dynamic resistance")
+            reasons.append(f"   • Rally contained (< 61.8%), trend intact")
+        
+        # Volume confirmation
+        volume_ratio = last['volume'] / last['volume_ma']
+        reasons.append(f"\n📊 VOLUME CONFIRMATION: {volume_ratio:.2f}x average volume")
+        reasons.append(f"   • Confirms genuine interest at this level")
+        
+        # RSI momentum
+        reasons.append(f"\n⚡ MOMENTUM: RSI at {last['rsi']:.1f}")
+        if signal_type == "LONG":
+            if last['rsi'] > 60:
+                reasons.append(f"   • Strong bullish momentum, extended target justified")
+            else:
+                reasons.append(f"   • Healthy momentum, room to run higher")
+        else:
+            if last['rsi'] < 40:
+                reasons.append(f"   • Strong bearish momentum, extended target justified")
+            else:
+                reasons.append(f"   • Healthy momentum, room to fall further")
+        
+        # Why enter NOW
+        reasons.append(f"\n💡 WHY ENTER NOW:")
+        reasons.append(f"   • Established trend with {swing_points} confirmed swing points")
+        reasons.append(f"   • Optimal pullback entry at key moving average")
+        reasons.append(f"   • Volume confirms buyers/sellers stepping in")
+        reasons.append(f"   • Risk-reward favorable with trend on our side")
+        
+        return "\n".join(reasons)
     
     def _generate_reasoning(self, signal_type: str, last: pd.Series, prev: pd.Series, 
                            confluence_count: int, market_bias: str) -> str:

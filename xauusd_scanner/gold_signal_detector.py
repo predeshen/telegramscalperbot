@@ -1,6 +1,6 @@
 """
 Gold Signal Detector with Multiple Strategies
-Implements Asian Range Breakout, EMA Cloud Breakout, and Mean Reversion strategies
+Implements Asian Range Breakout, EMA Cloud Breakout, Mean Reversion, and Trend Following strategies
 """
 from dataclasses import dataclass
 from datetime import datetime
@@ -9,6 +9,7 @@ import pandas as pd
 import logging
 
 from src.signal_detector import Signal
+from src.trend_analyzer import TrendAnalyzer
 from xauusd_scanner.strategy_selector import GoldStrategy, StrategySelector
 from xauusd_scanner.session_manager import SessionManager
 from xauusd_scanner.key_level_tracker import KeyLevelTracker
@@ -34,6 +35,7 @@ class GoldSignalDetector:
     1. Asian Range Breakout - Breakout of Asian session range
     2. EMA Cloud Breakout - Trend following with EMA alignment
     3. Mean Reversion - Reversals when overextended from VWAP
+    4. Trend Following - Pullback entries within established trends
     """
     
     def __init__(self,
@@ -56,7 +58,7 @@ class GoldSignalDetector:
         self.recent_signals = []
         self.duplicate_window_minutes = 15
         
-        logger.info("GoldSignalDetector initialized with 3 strategies")
+        logger.info("GoldSignalDetector initialized with 4 strategies")
     
     def detect_signals(self, data: pd.DataFrame, timeframe: str) -> Optional[GoldSignal]:
         """
@@ -92,6 +94,9 @@ class GoldSignalDetector:
         
         elif strategy == GoldStrategy.MEAN_REVERSION:
             signal = self._detect_mean_reversion(data, timeframe)
+        
+        elif strategy == GoldStrategy.TREND_FOLLOWING:
+            signal = self._detect_trend_following(data, timeframe)
         
         # Add session and strategy context if signal found
         if signal:
@@ -408,6 +413,190 @@ class GoldSignalDetector:
         
         except Exception as e:
             logger.error(f"Error in Mean Reversion detection: {e}")
+            return None
+    
+    def _detect_trend_following(self, data: pd.DataFrame, timeframe: str) -> Optional[GoldSignal]:
+        """
+        Detect trend-following signals for Gold.
+        
+        Strategy:
+        1. Detect swing points to identify trend
+        2. Verify EMA alignment with trend
+        3. Wait for pullback to EMA(21)
+        4. Confirm bounce with volume
+        5. Validate RSI range
+        6. Integrate session awareness and key levels
+        
+        Args:
+            data: DataFrame with OHLCV and indicators
+            timeframe: Timeframe string
+            
+        Returns:
+            GoldSignal if detected, None otherwise
+        """
+        try:
+            if len(data) < 50:
+                return None
+            
+            # Detect swing points
+            swing_data = TrendAnalyzer.detect_swing_points(data, lookback=5)
+            
+            # Check for uptrend or downtrend
+            is_uptrend = TrendAnalyzer.is_uptrend(swing_data, min_swings=3)
+            is_downtrend = TrendAnalyzer.is_downtrend(swing_data, min_swings=3)
+            
+            if not (is_uptrend or is_downtrend):
+                return None
+            
+            trend_direction = "uptrend" if is_uptrend else "downtrend"
+            
+            # Check if market is consolidating
+            if TrendAnalyzer.is_consolidating(data, periods=3):
+                logger.debug(f"Skipping Gold trend signal: market consolidating on {timeframe}")
+                return None
+            
+            # Verify EMA alignment
+            if not TrendAnalyzer.is_ema_aligned(data, trend_direction):
+                return None
+            
+            # Get last candles
+            last = data.iloc[-1]
+            prev = data.iloc[-2]
+            
+            # Calculate pullback depth
+            pullback_depth = TrendAnalyzer.calculate_pullback_depth(data, trend_direction)
+            
+            # Reject if pullback too deep
+            if pullback_depth > 61.8:
+                logger.debug(f"Skipping Gold trend signal: pullback too deep ({pullback_depth:.1f}%) on {timeframe}")
+                return None
+            
+            # Check volume confirmation
+            if last['volume'] < (last['volume_ma'] * 1.2):
+                return None
+            
+            # Check if volume is declining
+            volume_declining = (
+                last['volume'] < prev['volume'] and
+                prev['volume'] < data.iloc[-3]['volume']
+            )
+            
+            if volume_declining:
+                logger.debug(f"Skipping Gold trend signal: volume declining on {timeframe}")
+                return None
+            
+            # Detect pullback entry for uptrend
+            if is_uptrend:
+                # Check RSI range (40-80 for uptrends)
+                if not (40 <= last['rsi'] <= 80):
+                    return None
+                
+                # Check if price pulled back to EMA(21) and bounced
+                ema_21 = last.get('ema_21', last.get('ema_20'))
+                if pd.isna(ema_21):
+                    return None
+                
+                # Price should be near EMA(21) (within 1 ATR)
+                distance_from_ema = abs(last['close'] - ema_21)
+                if distance_from_ema > last['atr']:
+                    return None
+                
+                # Price should be bouncing up (close > open)
+                if last['close'] <= last['open']:
+                    return None
+                
+                # Generate LONG signal
+                entry_price = last['close']
+                atr = last['atr']
+                stop_loss = entry_price - (atr * 1.5)
+                
+                # Stronger trend gets larger target
+                if last['rsi'] > 60:
+                    take_profit = entry_price + (atr * 3.0)
+                else:
+                    take_profit = entry_price + (atr * 2.5)
+                
+                # Count swing points
+                total_swings = swing_data['higher_highs'] + swing_data['higher_lows']
+                
+                # Create signal
+                signal = self._create_gold_signal(
+                    timestamp=last['timestamp'],
+                    signal_type="LONG",
+                    timeframe=timeframe,
+                    entry_price=entry_price,
+                    stop_loss=stop_loss,
+                    take_profit=take_profit,
+                    atr=atr,
+                    indicators=last,
+                    strategy="Trend Following"
+                )
+                
+                # Add trend-specific metadata
+                signal.trend_direction = trend_direction
+                signal.swing_points = total_swings
+                signal.pullback_depth = pullback_depth
+                
+                return signal
+            
+            # Detect pullback entry for downtrend
+            elif is_downtrend:
+                # Check RSI range (20-60 for downtrends)
+                if not (20 <= last['rsi'] <= 60):
+                    return None
+                
+                # Check if price rallied to EMA(21) and rejected
+                ema_21 = last.get('ema_21', last.get('ema_20'))
+                if pd.isna(ema_21):
+                    return None
+                
+                # Price should be near EMA(21) (within 1 ATR)
+                distance_from_ema = abs(last['close'] - ema_21)
+                if distance_from_ema > last['atr']:
+                    return None
+                
+                # Price should be rejecting down (close < open)
+                if last['close'] >= last['open']:
+                    return None
+                
+                # Generate SHORT signal
+                entry_price = last['close']
+                atr = last['atr']
+                stop_loss = entry_price + (atr * 1.5)
+                
+                # Stronger trend gets larger target
+                if last['rsi'] < 40:
+                    take_profit = entry_price - (atr * 3.0)
+                else:
+                    take_profit = entry_price - (atr * 2.5)
+                
+                # Count swing points
+                total_swings = swing_data['lower_highs'] + swing_data['lower_lows']
+                
+                # Create signal
+                signal = self._create_gold_signal(
+                    timestamp=last['timestamp'],
+                    signal_type="SHORT",
+                    timeframe=timeframe,
+                    entry_price=entry_price,
+                    stop_loss=stop_loss,
+                    take_profit=take_profit,
+                    atr=atr,
+                    indicators=last,
+                    strategy="Trend Following"
+                )
+                
+                # Add trend-specific metadata
+                signal.trend_direction = trend_direction
+                signal.swing_points = total_swings
+                signal.pullback_depth = pullback_depth
+                
+                return signal
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error in Gold Trend Following detection: {e}")
             return None
     
     def _is_pin_bar(self, candle: pd.Series) -> bool:

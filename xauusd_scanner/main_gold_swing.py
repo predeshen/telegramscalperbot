@@ -313,6 +313,9 @@ def main():
                         if excel_reporter and not candles.empty:
                             last_candle = candles.iloc[-1]
                             session_info = session_manager.get_session_info()
+                            asian_range = session_manager.get_asian_range()
+                            spread_status = spread_monitor.get_spread_status()
+                            
                             scan_data = {
                                 'timestamp': datetime.now(),
                                 'scanner': f"XAUUSD-Swing-{session_info['session']}",
@@ -324,6 +327,8 @@ def main():
                                     'ema_9': last_candle.get('ema_9', None),
                                     'ema_21': last_candle.get('ema_21', None),
                                     'ema_50': last_candle.get('ema_50', None),
+                                    'ema_100': last_candle.get('ema_100', None),
+                                    'ema_200': last_candle.get('ema_200', None),
                                     'rsi': last_candle.get('rsi', None),
                                     'atr': last_candle.get('atr', None),
                                     'volume_ma': last_candle.get('volume_ma', None),
@@ -336,8 +341,19 @@ def main():
                                     'stop_loss': signal.stop_loss,
                                     'take_profit': signal.take_profit,
                                     'risk_reward': signal.risk_reward,
-                                    'strategy': getattr(signal, 'strategy', 'N/A')
-                                } if signal else {}
+                                    'strategy': getattr(signal, 'strategy', 'N/A'),
+                                    'confidence': getattr(signal, 'confidence', None),
+                                    'market_bias': getattr(signal, 'market_bias', None),
+                                    'trend_direction': getattr(signal, 'trend_direction', None),
+                                    'swing_points': getattr(signal, 'swing_points', None),
+                                    'pullback_depth': getattr(signal, 'pullback_depth', None)
+                                } if signal else {},
+                                'xauusd_specific': {
+                                    'session': session_info['session'],
+                                    'spread_pips': spread_status.get('current_pips', None),
+                                    'asian_range_high': asian_range.get('high', None) if asian_range else None,
+                                    'asian_range_low': asian_range.get('low', None) if asian_range else None
+                                }
                             }
                             excel_reporter.log_scan_result(scan_data)
                         
