@@ -424,3 +424,20 @@ class MultiAlerter:
             telegram_success = self.telegram_alerter.send_error_alert(error, context)
         
         return email_success or telegram_success
+    
+    def send_message(self, message: str) -> bool:
+        """
+        Send a plain text message to all configured channels.
+        
+        Args:
+            message: Message text to send
+            
+        Returns:
+            True if at least one channel succeeded
+        """
+        telegram_success = False
+        if self.telegram_alerter and self.telegram_alerter.enabled:
+            telegram_success = self.telegram_alerter.send_message(message)
+        
+        # Email alerter doesn't have send_message, only Telegram does
+        return telegram_success
