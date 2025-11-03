@@ -27,36 +27,21 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-
 class Signal:
-
     """Trading signal with entry, stop-loss, and take-profit levels."""
-
     timestamp: datetime
-
     signal_type: str  # "LONG" or "SHORT"
-
     timeframe: str
-
-    symbol: str = "BTC/USD"  # Trading symbol (e.g., "BTC/USD", "XAU/USD", "US30")
-
     entry_price: float
-
     stop_loss: float
-
     take_profit: float
-
     atr: float
-
     risk_reward: float
-
     market_bias: str  # "bullish", "bearish", "neutral"
-
     confidence: int  # 3-5 (number of confluence factors met)
-
     indicators: Dict[str, float]  # Snapshot of indicator values
-
     reasoning: str = ""  # Detailed explanation of why this signal was generated
+    symbol: str = "BTC/USD"  # Trading symbol (e.g., "BTC/USD", "XAU/USD", "US30")
 
     strategy: str = ""  # Strategy name (e.g., "Trend Following", "EMA Crossover")
 
