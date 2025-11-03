@@ -184,7 +184,7 @@ def main():
                     candle_data[timeframe] = candles
                     
                     # Detect signals
-                    signal = signal_detector.detect_signals(candles, timeframe)
+                    detected_signal = signal_detector.detect_signals(candles, timeframe)
                     
                     # Log scan result to Excel
                     if excel_reporter and not candles.empty:
@@ -207,34 +207,34 @@ def main():
                                 'volume_ma': last_row.get('volume_ma', None),
                                 'vwap': last_row.get('vwap', None)
                             },
-                            'signal_detected': signal is not None,
-                            'signal_type': signal.signal_type if signal else None,
+                            'signal_detected': detected_signal is not None,
+                            'signal_type': detected_signal.signal_type if detected_signal else None,
                             'signal_details': {
-                                'entry_price': signal.entry_price,
-                                'stop_loss': signal.stop_loss,
-                                'take_profit': signal.take_profit,
-                                'risk_reward': signal.risk_reward,
-                                'strategy': getattr(signal, 'strategy', 'EMA Crossover'),
-                                'confidence': getattr(signal, 'confidence', None),
-                                'market_bias': getattr(signal, 'market_bias', None),
-                                'trend_direction': getattr(signal, 'trend_direction', None),
-                                'swing_points': getattr(signal, 'swing_points', None),
-                                'pullback_depth': getattr(signal, 'pullback_depth', None)
-                            } if signal else {}
+                                'entry_price': detected_signal.entry_price,
+                                'stop_loss': detected_signal.stop_loss,
+                                'take_profit': detected_signal.take_profit,
+                                'risk_reward': detected_signal.risk_reward,
+                                'strategy': getattr(detected_signal, 'strategy', 'EMA Crossover'),
+                                'confidence': getattr(detected_signal, 'confidence', None),
+                                'market_bias': getattr(detected_signal, 'market_bias', None),
+                                'trend_direction': getattr(detected_signal, 'trend_direction', None),
+                                'swing_points': getattr(detected_signal, 'swing_points', None),
+                                'pullback_depth': getattr(detected_signal, 'pullback_depth', None)
+                            } if detected_signal else {}
                         }
                         excel_reporter.log_scan_result(scan_data)
                     
-                    if signal:
-                        logger.info(f"🚨 {signal.signal_type} SIGNAL on {timeframe}!")
-                        logger.info(f"Entry: ${signal.entry_price:.2f}, SL: ${signal.stop_loss:.2f}, TP: ${signal.take_profit:.2f}")
-                        logger.info(f"Confidence: {signal.confidence}/5, R:R = {signal.risk_reward:.2f}")
+                    if detected_signal:
+                        logger.info(f"🚨 {detected_signal.signal_type} SIGNAL on {timeframe}!")
+                        logger.info(f"Entry: ${detected_signal.entry_price:.2f}, SL: ${detected_signal.stop_loss:.2f}, TP: ${detected_signal.take_profit:.2f}")
+                        logger.info(f"Confidence: {detected_signal.confidence}/5, R:R = {detected_signal.risk_reward:.2f}")
                         
                         # Send alert
                         if alerter:
-                            alerter.send_signal_alert(signal)
+                            alerter.send_signal_alert(detected_signal)
                         
                         # Track trade
-                        trade_tracker.add_trade(signal)
+                        trade_tracker.add_trade(detected_signal)
                 
                 except Exception as e:
                     logger.error(f"Error processing {timeframe}: {e}")
