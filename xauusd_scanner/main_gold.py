@@ -72,9 +72,9 @@ def main():
     logger.info("Initializing components...")
     
     market_client = MarketDataClient(
-        exchange_name=config['exchange'],
-        symbol=config['symbol'],
-        timeframes=config['timeframes'],
+        exchange_name=config['exchange']['name'],
+        symbol=config['exchange']['symbol'],
+        timeframes=config['exchange']['timeframes'],
         buffer_size=200
     )
     
@@ -287,7 +287,7 @@ def main():
                         scan_data = {
                             'timestamp': datetime.now(),
                             'scanner': f"XAUUSD-Scalp-{session_info['session']}",
-                            'symbol': config['symbol'],
+                            'symbol': config['exchange']['symbol'],
                             'timeframe': timeframe,
                             'price': last_candle['close'],
                             'volume': last_candle['volume'],
