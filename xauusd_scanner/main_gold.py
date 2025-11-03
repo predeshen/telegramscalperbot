@@ -99,8 +99,8 @@ def main():
     # Initialize alerter
     alerter = None
     if config['telegram']['enabled']:
-        bot_token = os.getenv(config['telegram']['bot_token_env'])
-        chat_id = os.getenv(config['telegram']['chat_id_env'])
+        bot_token = config['telegram']['bot_token']
+        chat_id = config['telegram']['chat_id']
         
         if bot_token and chat_id:
             alerter = TelegramAlerter(bot_token, chat_id)
