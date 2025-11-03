@@ -16,13 +16,14 @@
     "volume_ma_period": 20
   },
   "signal_rules": {
-    "volume_spike_threshold": 1.3,
+    "volume_spike_threshold": 0.8,
+    "volume_reversal_threshold": 1.2,
     "rsi_min": 30,
     "rsi_max": 70,
     "stop_loss_atr_multiplier": 2.0,
     "take_profit_atr_multiplier": 3.0,
-    "duplicate_time_window_minutes": 240,
-    "duplicate_price_threshold_percent": 0.5
+    "duplicate_time_window_minutes": 120,
+    "duplicate_price_threshold_percent": 0.3
   },
   "telegram": {
     "enabled": true,

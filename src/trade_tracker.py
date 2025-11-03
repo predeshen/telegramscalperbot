@@ -19,7 +19,9 @@ class TradeStatus:
     breakeven_notified: bool = False
     target_notified: bool = False
     stop_warning_sent: bool = False
-    status: str = "ACTIVE"  # ACTIVE, CLOSED_TP, CLOSED_SL
+    tp_extension_notified: bool = False
+    extended_tp: Optional[float] = None
+    status: str = "ACTIVE"  # ACTIVE, CLOSED_TP, CLOSED_SL, EXTENDED
 
 
 class TradeTracker:
@@ -63,24 +65,34 @@ class TradeTracker:
         self.active_trades[trade_id] = trade_status
         logger.info(f"Added trade to tracking: {trade_id}")
     
-    def update_trades(self, current_price: float) -> None:
+    def update_trades(self, current_price: float, indicators: Optional[Dict] = None) -> None:
         """
         Update all active trades with current price and send notifications.
         
         Args:
             current_price: Current market price
+            indicators: Optional dict with current RSI, ADX, volume_ratio for TP extension logic
         """
         for trade_id, trade in list(self.active_trades.items()):
             signal = trade.signal
             
+            # Use extended TP if available
+            target_price = trade.extended_tp if trade.extended_tp else signal.take_profit
+            
             # Check if trade should be closed
-            if self._check_target_hit(signal, current_price, trade):
+            if self._check_target_hit_extended(signal, current_price, trade, target_price):
                 self._close_trade(trade_id, "TARGET", current_price)
                 continue
             
             if self._check_stop_hit(signal, current_price, trade):
                 self._close_trade(trade_id, "STOP", current_price)
                 continue
+            
+            # Check for TP extension opportunity (before hitting original TP)
+            if not trade.tp_extension_notified and indicators:
+                if self._should_extend_tp(signal, current_price, trade, indicators):
+                    self._send_tp_extension_alert(signal, current_price, trade, indicators)
+                    trade.tp_extension_notified = True
             
             # Check for management updates
             if not trade.breakeven_notified:
@@ -99,6 +111,13 @@ class TradeTracker:
             return current_price >= signal.take_profit
         else:
             return current_price <= signal.take_profit
+    
+    def _check_target_hit_extended(self, signal: Signal, current_price: float, trade: TradeStatus, target_price: float) -> bool:
+        """Check if take-profit target (original or extended) was hit."""
+        if signal.signal_type == "LONG":
+            return current_price >= target_price
+        else:
+            return current_price <= target_price
     
     def _check_stop_hit(self, signal: Signal, current_price: float, trade: TradeStatus) -> bool:
         """Check if stop-loss was hit."""
@@ -122,6 +141,121 @@ class TradeTracker:
         total_risk = abs(signal.entry_price - signal.stop_loss)
         
         return distance_to_stop < (total_risk * 0.2)
+    
+    def _should_extend_tp(self, signal: Signal, current_price: float, trade: TradeStatus, indicators: Dict) -> bool:
+        """
+        Check if TP should be extended based on strong continuation signals.
+        
+        Criteria for extension:
+        1. Price within 80-95% of original TP (approaching but not hit yet)
+        2. RSI still has room (not overbought/oversold)
+        3. ADX > 25 (strong trend)
+        4. Volume still elevated (> 1.0x average)
+        5. RSI direction aligned with trade (rising for LONG, falling for SHORT)
+        
+        Args:
+            signal: Original signal
+            current_price: Current price
+            trade: Trade status
+            indicators: Dict with 'rsi', 'adx', 'volume_ratio', 'prev_rsi'
+            
+        Returns:
+            True if TP should be extended
+        """
+        # Check if price is approaching TP (80-95% of the way)
+        if signal.signal_type == "LONG":
+            distance_to_tp = signal.take_profit - current_price
+            total_move = signal.take_profit - signal.entry_price
+            progress = 1 - (distance_to_tp / total_move) if total_move != 0 else 0
+            
+            if not (0.80 <= progress <= 0.95):
+                return False
+            
+            # Check RSI has room (not overbought)
+            rsi = indicators.get('rsi', 50)
+            if rsi > 70:
+                return False
+            
+            # Check RSI is rising
+            prev_rsi = indicators.get('prev_rsi', rsi)
+            if rsi <= prev_rsi:
+                return False
+            
+        else:  # SHORT
+            distance_to_tp = current_price - signal.take_profit
+            total_move = signal.entry_price - signal.take_profit
+            progress = 1 - (distance_to_tp / total_move) if total_move != 0 else 0
+            
+            if not (0.80 <= progress <= 0.95):
+                return False
+            
+            # Check RSI has room (not oversold)
+            rsi = indicators.get('rsi', 50)
+            if rsi < 30:
+                return False
+            
+            # Check RSI is falling
+            prev_rsi = indicators.get('prev_rsi', rsi)
+            if rsi >= prev_rsi:
+                return False
+        
+        # Check ADX shows strong trend
+        adx = indicators.get('adx', 0)
+        if adx < 25:
+            return False
+        
+        # Check volume still elevated
+        volume_ratio = indicators.get('volume_ratio', 0)
+        if volume_ratio < 1.0:
+            return False
+        
+        logger.info(f"TP extension criteria met: RSI={rsi:.1f}, ADX={adx:.1f}, Volume={volume_ratio:.2f}x, Progress={progress*100:.1f}%")
+        return True
+    
+    def _send_tp_extension_alert(self, signal: Signal, current_price: float, trade: TradeStatus, indicators: Dict) -> None:
+        """Send alert to hold and extend TP."""
+        # Calculate extended TP (add another 1.5x ATR)
+        if signal.signal_type == "LONG":
+            extended_tp = signal.take_profit + (signal.atr * 1.5)
+        else:
+            extended_tp = signal.take_profit - (signal.atr * 1.5)
+        
+        trade.extended_tp = extended_tp
+        trade.status = "EXTENDED"
+        
+        rsi = indicators.get('rsi', 0)
+        adx = indicators.get('adx', 0)
+        volume_ratio = indicators.get('volume_ratio', 0)
+        
+        message = f"""
+🚀 *TRADE UPDATE: EXTEND TARGET - HOLD!*
+
+{signal.signal_type} from ${signal.entry_price:,.2f}
+Current Price: ${current_price:,.2f}
+
+*🎯 STRONG CONTINUATION DETECTED:*
+✅ RSI: {rsi:.1f} - Still has room to run
+✅ ADX: {adx:.1f} - Strong trend strength
+✅ Volume: {volume_ratio:.2f}x - Institutional flow continues
+✅ Price approaching TP with momentum
+
+*📈 RECOMMENDED ACTION:*
+🔸 Original TP: ${signal.take_profit:,.2f}
+🔸 Extended TP: ${extended_tp:,.2f} (+{abs(extended_tp - signal.take_profit):.2f})
+
+*💡 TRADE MANAGEMENT:*
+• HOLD your position - don't close at original TP
+• Move stop to ${signal.entry_price:,.2f} (breakeven) if not done
+• New target: ${extended_tp:,.2f}
+• Trail stop as price moves in your favor
+
+This is a runner! The trend is strong and likely to continue past your original target.
+
+⏰ {datetime.now().strftime('%H:%M:%S UTC')}
+"""
+        
+        self.alerter.send_message(message)
+        logger.info(f"Sent TP extension alert for {signal.signal_type} trade: ${signal.take_profit:,.2f} -> ${extended_tp:,.2f}")
     
     def _send_breakeven_update(self, signal: Signal, current_price: float) -> None:
         """Send notification to move stop to breakeven."""

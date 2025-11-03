@@ -128,12 +128,24 @@ def main():
         candles = market_client.get_latest_candles(timeframe, count=500)
         
         # Calculate indicators
+        candles['ema_9'] = indicator_calc.calculate_ema(candles, 9)
         candles['ema_21'] = indicator_calc.calculate_ema(candles, config['indicators']['ema_fast'])
         candles['ema_50'] = indicator_calc.calculate_ema(candles, config['indicators']['ema_momentum'])
         candles['ema_200'] = indicator_calc.calculate_ema(candles, config['indicators']['ema_trend'])
         candles['atr'] = indicator_calc.calculate_atr(candles, config['indicators']['atr_period'])
         candles['rsi'] = indicator_calc.calculate_rsi(candles, config['indicators']['rsi_period'])
         candles['volume_ma'] = indicator_calc.calculate_volume_ma(candles, config['indicators']['volume_ma_period'])
+        
+        # Calculate VWAP
+        candles['vwap'] = indicator_calc.calculate_vwap(candles)
+        
+        # Calculate Stochastic
+        stoch_k, stoch_d = indicator_calc.calculate_stochastic(candles, k_period=14, d_period=3, smooth_k=3)
+        candles['stoch_k'] = stoch_k
+        candles['stoch_d'] = stoch_d
+        
+        # Calculate ADX
+        candles['adx'] = indicator_calc.calculate_adx(candles, period=14)
         
         # Calculate MACD
         macd, macd_signal, macd_histogram = indicator_calc.calculate_macd(
@@ -170,36 +182,40 @@ def main():
     # Track last check times to avoid duplicate signals
     last_check_times = {tf: None for tf in config['exchange']['timeframes']}
     last_heartbeat = time.time()
-    heartbeat_interval = 900  # 15 minutes in seconds
+    heartbeat_interval = 3600  # 60 minutes in seconds
     
     try:
         while True:
             # Update data for each timeframe
             for timeframe in config['exchange']['timeframes']:
                 try:
-                    # Determine check interval based on timeframe
-                    check_intervals = {
-                        '4h': 14400,  # 4 hours
-                        '1d': 86400   # 1 day
-                    }
-                    
-                    interval = check_intervals.get(timeframe, 3600)
-                    
-                    # Check if we should scan this timeframe
+                    # Always scan on each polling interval (let duplicate detection handle filtering)
                     current_time = datetime.now()
-                    last_check = last_check_times[timeframe]
                     
-                    if last_check is None or (current_time - last_check).total_seconds() >= interval:
+                    # Only check if we need to fetch new data (avoid excessive API calls)
+                    if True:
                         # Fetch latest candles
                         candles = market_client.get_latest_candles(timeframe, count=500)
                         
                         # Calculate indicators
+                        candles['ema_9'] = indicator_calc.calculate_ema(candles, 9)
                         candles['ema_21'] = indicator_calc.calculate_ema(candles, config['indicators']['ema_fast'])
                         candles['ema_50'] = indicator_calc.calculate_ema(candles, config['indicators']['ema_momentum'])
                         candles['ema_200'] = indicator_calc.calculate_ema(candles, config['indicators']['ema_trend'])
                         candles['atr'] = indicator_calc.calculate_atr(candles, config['indicators']['atr_period'])
                         candles['rsi'] = indicator_calc.calculate_rsi(candles, config['indicators']['rsi_period'])
                         candles['volume_ma'] = indicator_calc.calculate_volume_ma(candles, config['indicators']['volume_ma_period'])
+                        
+                        # Calculate VWAP
+                        candles['vwap'] = indicator_calc.calculate_vwap(candles)
+                        
+                        # Calculate Stochastic
+                        stoch_k, stoch_d = indicator_calc.calculate_stochastic(candles, k_period=14, d_period=3, smooth_k=3)
+                        candles['stoch_k'] = stoch_k
+                        candles['stoch_d'] = stoch_d
+                        
+                        # Calculate ADX
+                        candles['adx'] = indicator_calc.calculate_adx(candles, period=14)
                         
                         # Calculate MACD
                         macd, macd_signal, macd_histogram = indicator_calc.calculate_macd(
@@ -217,9 +233,12 @@ def main():
                         # Detect signals
                         signal = signal_detector.detect_signals(candles, timeframe, symbol="US30")
                         
+                        # Calculate volume ratio for logging
+                        last_row = candles.iloc[-1] if not candles.empty else None
+                        volume_ratio = last_row['volume'] / last_row['volume_ma'] if last_row is not None and 'volume_ma' in last_row.index else 0
+                        
                         # Log scan result to Excel
                         if excel_reporter and not candles.empty:
-                            last_row = candles.iloc[-1]
                             scan_data = {
                                 'timestamp': datetime.now(),
                                 'scanner': 'US30-Swing',
@@ -236,7 +255,9 @@ def main():
                                     'rsi': last_row.get('rsi', None),
                                     'atr': last_row.get('atr', None),
                                     'volume_ma': last_row.get('volume_ma', None),
-                                    'vwap': last_row.get('vwap', None)
+                                    'vwap': last_row.get('vwap', None),
+                                    'stoch_k': last_row.get('stoch_k', None),
+                                    'stoch_d': last_row.get('stoch_d', None)
                                 },
                                 'signal_detected': signal is not None,
                                 'signal_type': signal.signal_type if signal else None,
@@ -268,6 +289,13 @@ def main():
                             # Track trade
                             trade_tracker.add_trade(signal)
                         
+                        # Log scan completion with detailed indicators
+                        if not candles.empty and last_row is not None:
+                            logger.info(f"[{timeframe}] Scan complete - Price: ${last_row['close']:.2f}")
+                            logger.info(f"[{timeframe}] Trend: EMA9=${last_row.get('ema_9', 0):.2f}, EMA21=${last_row.get('ema_21', 0):.2f}, EMA50=${last_row.get('ema_50', 0):.2f}")
+                            logger.info(f"[{timeframe}] Volume: {last_row['volume']:,.0f} ({volume_ratio:.2f}x avg)")
+                            logger.info(f"[{timeframe}] RSI: {last_row.get('rsi', 0):.1f}")
+                        
                         # Update last check time
                         last_check_times[timeframe] = current_time
                 
@@ -276,8 +304,21 @@ def main():
             
             # Check for trade updates
             try:
-                current_price = candle_data[config['exchange']['timeframes'][0]].iloc[-1]['close']
-                trade_tracker.update_trades(current_price)
+                df = candle_data[config['exchange']['timeframes'][0]]
+                if not df.empty and len(df) >= 2:
+                    last_candle = df.iloc[-1]
+                    prev_candle = df.iloc[-2]
+                    current_price = last_candle['close']
+                    
+                    # Prepare indicators for TP extension logic
+                    indicators = {
+                        'rsi': last_candle.get('rsi', 50),
+                        'prev_rsi': prev_candle.get('rsi', 50),
+                        'adx': last_candle.get('adx', 0),
+                        'volume_ratio': last_candle['volume'] / last_candle['volume_ma'] if last_candle.get('volume_ma', 0) > 0 else 0
+                    }
+                    
+                    trade_tracker.update_trades(current_price, indicators)
             
             except Exception as e:
                 logger.error(f"Error checking trade updates: {e}")

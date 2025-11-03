@@ -165,6 +165,14 @@ def main():
         candles['rsi'] = indicator_calc.calculate_rsi(candles, 14)
         candles['volume_ma'] = indicator_calc.calculate_volume_ma(candles, 20)
         
+        # Calculate Stochastic
+        stoch_k, stoch_d = indicator_calc.calculate_stochastic(candles, k_period=14, d_period=3, smooth_k=3)
+        candles['stoch_k'] = stoch_k
+        candles['stoch_d'] = stoch_d
+        
+        # Calculate ADX
+        candles['adx'] = indicator_calc.calculate_adx(candles, period=14)
+        
         candle_data[timeframe] = candles
         logger.info(f"Loaded {timeframe} data with indicators")
     
@@ -190,7 +198,7 @@ def main():
     last_spread_pause = False
     last_check_times = {tf: None for tf in config['exchange']['timeframes']}
     last_heartbeat = time.time()
-    heartbeat_interval = 900  # 15 minutes in seconds
+    heartbeat_interval = 3600  # 60 minutes in seconds
     
     try:
         while True:
@@ -252,6 +260,14 @@ def main():
                     candles['atr'] = indicator_calc.calculate_atr(candles, 14)
                     candles['rsi'] = indicator_calc.calculate_rsi(candles, 14)
                     candles['volume_ma'] = indicator_calc.calculate_volume_ma(candles, 20)
+                    
+                    # Calculate Stochastic
+                    stoch_k, stoch_d = indicator_calc.calculate_stochastic(candles, k_period=14, d_period=3, smooth_k=3)
+                    candles['stoch_k'] = stoch_k
+                    candles['stoch_d'] = stoch_d
+                    
+                    # Calculate ADX
+                    candles['adx'] = indicator_calc.calculate_adx(candles, period=14)
                     
                     candle_data[timeframe] = candles
                     
@@ -383,8 +399,21 @@ def main():
             
             # Check for trade updates
             try:
-                current_price = candle_data[config['exchange']['timeframes'][0]].iloc[-1]['close']
-                trade_tracker.update_trades(current_price)
+                df = candle_data[config['exchange']['timeframes'][0]]
+                if not df.empty and len(df) >= 2:
+                    last_candle = df.iloc[-1]
+                    prev_candle = df.iloc[-2]
+                    current_price = last_candle['close']
+                    
+                    # Prepare indicators for TP extension logic
+                    indicators = {
+                        'rsi': last_candle.get('rsi', 50),
+                        'prev_rsi': prev_candle.get('rsi', 50),
+                        'adx': last_candle.get('adx', 0),
+                        'volume_ratio': last_candle['volume'] / last_candle['volume_ma'] if last_candle.get('volume_ma', 0) > 0 else 0
+                    }
+                    
+                    trade_tracker.update_trades(current_price, indicators)
             
             except Exception as e:
                 logger.error(f"Error checking trade updates: {e}")

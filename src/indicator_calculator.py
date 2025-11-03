@@ -379,6 +379,54 @@ class IndicatorCalculator:
             return empty, empty, empty
     
     @staticmethod
+    def calculate_adx(data: pd.DataFrame, period: int = 14) -> pd.Series:
+        """
+        Calculate Average Directional Index (ADX).
+        
+        Args:
+            data: DataFrame with OHLC data
+            period: ADX period
+            
+        Returns:
+            Series with ADX values
+        """
+        try:
+            # Calculate True Range
+            high_low = data['high'] - data['low']
+            high_close = np.abs(data['high'] - data['close'].shift())
+            low_close = np.abs(data['low'] - data['close'].shift())
+            
+            true_range = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+            
+            # Calculate Directional Movement
+            high_diff = data['high'] - data['high'].shift()
+            low_diff = data['low'].shift() - data['low']
+            
+            plus_dm = pd.Series(0.0, index=data.index)
+            minus_dm = pd.Series(0.0, index=data.index)
+            
+            plus_dm[high_diff > low_diff] = high_diff[high_diff > low_diff]
+            plus_dm[plus_dm < 0] = 0
+            
+            minus_dm[low_diff > high_diff] = low_diff[low_diff > high_diff]
+            minus_dm[minus_dm < 0] = 0
+            
+            # Smooth with Wilder's method
+            atr = true_range.ewm(alpha=1/period, adjust=False).mean()
+            plus_di = 100 * (plus_dm.ewm(alpha=1/period, adjust=False).mean() / atr)
+            minus_di = 100 * (minus_dm.ewm(alpha=1/period, adjust=False).mean() / atr)
+            
+            # Calculate DX and ADX
+            dx = 100 * np.abs(plus_di - minus_di) / (plus_di + minus_di)
+            adx = dx.ewm(alpha=1/period, adjust=False).mean()
+            
+            return adx
+            
+        except Exception as e:
+            logger.error(f"Error calculating ADX({period}): {e}")
+            return pd.Series(index=data.index, dtype=float)
+    
+    @staticmethod
     def calculate_all_indicators(
         data: pd.DataFrame,
         ema_periods: list = [9, 21, 50, 100, 200],
