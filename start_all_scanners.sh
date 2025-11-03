@@ -47,7 +47,7 @@ start_scanner() {
     fi
     
     # Start in screen session
-    screen -dmS "$screen_name" bash -c "python $script; echo 'Scanner stopped. Press enter to close.'; read"
+    screen -dmS "$screen_name" bash -c "python3 $script; echo 'Scanner stopped. Press enter to close.'; read"
     
     sleep 2
     
