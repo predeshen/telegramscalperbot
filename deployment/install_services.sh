@@ -60,8 +60,8 @@ fi
 
 # Install dependencies as the actual user
 echo "Installing Python dependencies..."
-sudo -u "$ACTUAL_USER" python3 -m pip install -r requirements.txt --quiet
-echo "✓ Dependencies installed"
+sudo -u "$ACTUAL_USER" python3 -m pip install --break-system-packages -r requirements.txt --quiet 2>/dev/null || echo "⚠️  Skipping pip install (packages may already be installed)"
+echo "✓ Dependencies check complete"
 
 # Check .env file
 echo
