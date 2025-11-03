@@ -147,7 +147,7 @@ class BTCScalpingScanner:
             # Fetch initial historical data
             logger.info("Fetching initial candlestick data...")
             for timeframe in self.config.exchange.timeframes:
-                self.market_client.get_latest_candles(timeframe, 200)
+                self.market_client.get_latest_candles(timeframe, 500)
                 logger.info(f"Loaded {timeframe} data")
             
             # Use polling mode instead of WebSocket for better compatibility
@@ -173,7 +173,7 @@ class BTCScalpingScanner:
                 try:
                     # Fetch latest data for each timeframe
                     for timeframe in self.config.exchange.timeframes:
-                        df = self.market_client.get_latest_candles(timeframe, 200)
+                        df = self.market_client.get_latest_candles(timeframe, 500)
                         
                         if not df.empty:
                             # Update health monitor

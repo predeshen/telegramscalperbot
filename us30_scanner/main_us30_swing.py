@@ -125,7 +125,7 @@ def main():
     logger.info("Fetching initial data...")
     candle_data = {}
     for timeframe in config['exchange']['timeframes']:
-        candles = market_client.get_latest_candles(timeframe, count=200)
+        candles = market_client.get_latest_candles(timeframe, count=500)
         
         # Calculate indicators
         candles['ema_21'] = indicator_calc.calculate_ema(candles, config['indicators']['ema_fast'])
@@ -189,7 +189,7 @@ def main():
                     
                     if last_check is None or (current_time - last_check).total_seconds() >= interval:
                         # Fetch latest candles
-                        candles = market_client.get_latest_candles(timeframe, count=200)
+                        candles = market_client.get_latest_candles(timeframe, count=500)
                         
                         # Calculate indicators
                         candles['ema_21'] = indicator_calc.calculate_ema(candles, config['indicators']['ema_fast'])
