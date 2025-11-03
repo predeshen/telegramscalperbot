@@ -178,6 +178,10 @@ def main():
     
     logger.info("Scanner is now running. Press Ctrl+C to stop.")
     
+    # Track heartbeat
+    last_heartbeat = time.time()
+    heartbeat_interval = 900  # 15 minutes in seconds
+    
     try:
         while True:
             # Check if within trading hours
@@ -277,6 +281,27 @@ def main():
             
             except Exception as e:
                 logger.error(f"Error checking trade updates: {e}")
+            
+            # Check if it's time for heartbeat message (every 15 minutes)
+            current_time = time.time()
+            if current_time - last_heartbeat >= heartbeat_interval:
+                try:
+                    # Get latest data for heartbeat
+                    df = candle_data[config['exchange']['timeframes'][0]]
+                    if not df.empty:
+                        last_candle = df.iloc[-1]
+                        heartbeat_msg = (
+                            f"🤍 <b>US30 Scalp Scanner Heartbeat</b>\n\n"
+                            f"⏰ Time: {datetime.now().strftime('%H:%M:%S UTC')}\n"
+                            f"💰 Price: {last_candle['close']:,.2f}\n"
+                            f"📊 Volume: {last_candle['volume']:,.0f}\n"
+                            f"📈 RSI: {last_candle.get('rsi', 0):.1f}\n"
+                            f"🔍 Status: Actively scanning..."
+                        )
+                        alerter.send_message(heartbeat_msg)
+                        last_heartbeat = current_time
+                except Exception as e:
+                    logger.warning(f"Failed to send heartbeat: {e}")
             
             # Sleep
             time.sleep(config['polling_interval_seconds'])
