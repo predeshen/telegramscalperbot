@@ -1,0 +1,30 @@
+[Unit]
+Description=BTC Swing Scanner (15m/1h/4h/1d timeframes)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/telegramscalperbot
+ExecStart=/usr/bin/python3 /home/ubuntu/telegramscalperbot/main_swing.py
+Restart=always
+RestartSec=10
+StandardOutput=append:/home/ubuntu/telegramscalperbot/logs/scanner_swing.log
+StandardError=append:/home/ubuntu/telegramscalperbot/logs/scanner_swing.log
+
+# Environment variables
+Environment="PYTHONUNBUFFERED=1"
+EnvironmentFile=/home/ubuntu/telegramscalperbot/.env
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+
+# Resource limits
+LimitNOFILE=4096
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target

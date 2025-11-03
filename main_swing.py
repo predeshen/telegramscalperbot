@@ -5,6 +5,7 @@ Monitors 15m, 1h, 4h, and 1d timeframes for longer-term signals
 import json
 import logging
 import os
+import signal
 import sys
 import time
 from datetime import datetime
@@ -47,8 +48,19 @@ def load_config(config_path: str = "config/config_multitime.json") -> dict:
         return json.load(f)
 
 
+def signal_handler(signum, frame):
+    """Handle shutdown signals gracefully."""
+    logger = logging.getLogger(__name__)
+    logger.info(f"\nReceived signal {signum}, shutting down gracefully...")
+    sys.exit(0)
+
+
 def main():
     """Main scanner loop for swing trading timeframes."""
+    # Register signal handlers for graceful shutdown
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    
     # Load configuration
     config = load_config()
     

@@ -22,14 +22,14 @@ class YFinanceClient:
     Compatible with the MarketDataClient interface but uses yfinance backend.
     """
     
-    def __init__(self, symbol: str, timeframes: List[str], buffer_size: int = 200):
+    def __init__(self, symbol: str, timeframes: List[str], buffer_size: int = 500):
         """
         Initialize YFinance client.
         
         Args:
             symbol: Yahoo Finance symbol (e.g., 'GC=F' for Gold Futures, 'XAUUSD=X' for Gold Spot)
             timeframes: List of timeframes to monitor (e.g., ['1m', '5m', '15m', '1h', '4h', '1d'])
-            buffer_size: Maximum number of candles to keep in memory per timeframe
+            buffer_size: Maximum number of candles to keep in memory per timeframe (default: 500)
         """
         self.symbol = symbol
         self.timeframes = timeframes
@@ -98,19 +98,20 @@ class YFinanceClient:
         """Check if client is connected."""
         return self._connected
     
-    def get_latest_candles(self, timeframe: str, count: int = 200) -> pd.DataFrame:
+    def get_latest_candles(self, timeframe: str, count: int = 500) -> pd.DataFrame:
         """
-        Fetch historical candlesticks from Yahoo Finance.
+        Fetch historical candlesticks from Yahoo Finance with validation.
         
         Args:
             timeframe: Timeframe string (e.g., '1m', '5m', '1h', '1d')
-            count: Number of candles to fetch
+            count: Number of candles to fetch (default: 500)
             
         Returns:
             DataFrame with OHLCV data and timestamp
             
         Raises:
             RuntimeError: If not connected
+            ValueError: If fetched data is invalid
         """
         if not self._connected or self.ticker is None:
             raise RuntimeError("Not connected. Call connect() first.")
@@ -122,11 +123,13 @@ class YFinanceClient:
             # Determine period based on timeframe and count
             period = self._calculate_period(timeframe, count)
             
+            logger.debug(f"Fetching {timeframe} data: period={period}, interval={yf_interval}, requested_count={count}")
+            
             # Fetch data
             df = self.ticker.history(period=period, interval=yf_interval)
             
             if df.empty:
-                logger.warning(f"No data returned for {timeframe}")
+                logger.warning(f"No data returned for {timeframe} (period={period})")
                 return pd.DataFrame()
             
             # Rename columns to match our format
@@ -147,10 +150,29 @@ class YFinanceClient:
                 df['timestamp'] = pd.to_datetime(df['timestamp'])
             
             # Select only needed columns
-            df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
+            available_cols = [col for col in ['timestamp', 'open', 'high', 'low', 'close', 'volume'] if col in df.columns]
+            df = df[available_cols]
+            
+            # Validate required columns
+            required_columns = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
+            missing_columns = [col for col in required_columns if col not in df.columns]
+            if missing_columns:
+                logger.error(f"Missing columns in fetched data: {missing_columns}")
+                raise ValueError(f"Missing columns: {', '.join(missing_columns)}")
+            
+            # Check for NaN values
+            ohlcv_cols = ['open', 'high', 'low', 'close', 'volume']
+            for col in ohlcv_cols:
+                nan_count = df[col].isna().sum()
+                if nan_count > 0:
+                    logger.warning(f"{nan_count} NaN values found in '{col}' column for {timeframe}")
             
             # Take last 'count' rows
             df = df.tail(count)
+            
+            # Log data quality
+            if len(df) < count:
+                logger.warning(f"Requested {count} candles but got {len(df)} for {timeframe} (period={period})")
             
             # Update buffer
             with self.buffer_locks[timeframe]:
@@ -158,7 +180,7 @@ class YFinanceClient:
                 for _, row in df.iterrows():
                     self.buffers[timeframe].append(row.to_dict())
             
-            logger.info(f"Fetched {len(df)} candles for {timeframe}")
+            logger.info(f"Fetched {len(df)} candles for {timeframe} (requested: {count}, period: {period})")
             return df
             
         except Exception as e:
@@ -169,6 +191,8 @@ class YFinanceClient:
         """
         Calculate the period parameter for yfinance based on timeframe and count.
         
+        Fixed to ensure sufficient data is fetched by adding 20% buffer.
+        
         Args:
             timeframe: Timeframe string
             count: Number of candles needed
@@ -176,7 +200,7 @@ class YFinanceClient:
         Returns:
             Period string for yfinance (e.g., '1d', '5d', '1mo', '3mo', '1y', '2y', 'max')
         """
-        # Estimate total time needed
+        # Estimate total time needed (with 20% buffer to ensure we get enough data)
         timeframe_minutes = {
             '1m': 1,
             '2m': 2,
@@ -192,28 +216,72 @@ class YFinanceClient:
             '1mo': 43200
         }
         
-        minutes_needed = timeframe_minutes.get(timeframe, 60) * count
+        minutes_per_candle = timeframe_minutes.get(timeframe, 60)
+        minutes_needed = minutes_per_candle * count * 1.2  # Add 20% buffer
         days_needed = minutes_needed / 1440
         
-        # Map to yfinance periods
-        if days_needed <= 1:
-            return '1d'
-        elif days_needed <= 5:
-            return '5d'
-        elif days_needed <= 30:
-            return '1mo'
-        elif days_needed <= 90:
-            return '3mo'
-        elif days_needed <= 180:
-            return '6mo'
-        elif days_needed <= 365:
-            return '1y'
-        elif days_needed <= 730:
-            return '2y'
-        elif days_needed <= 1825:
-            return '5y'
-        else:
-            return 'max'
+        logger.debug(f"Period calculation: {timeframe} × {count} candles = {days_needed:.1f} days needed")
+        
+        # Map to yfinance periods (be more generous to ensure we get enough data)
+        # YFinance has limitations on intraday data availability
+        if timeframe in ['1m', '2m', '5m']:
+            # Intraday data limited to last 7-30 days
+            if days_needed <= 1:
+                return '1d'
+            elif days_needed <= 5:
+                return '5d'
+            elif days_needed <= 30:
+                return '1mo'
+            else:
+                logger.warning(f"Requesting {days_needed:.1f} days of {timeframe} data, but YFinance limits intraday data to ~30 days")
+                return '1mo'
+        
+        elif timeframe in ['15m', '30m', '90m']:
+            # 15m/30m/90m data limited to last 60 days
+            if days_needed <= 1:
+                return '1d'
+            elif days_needed <= 5:
+                return '5d'
+            elif days_needed <= 30:
+                return '1mo'
+            elif days_needed <= 60:
+                return '2mo'
+            else:
+                logger.warning(f"Requesting {days_needed:.1f} days of {timeframe} data, but YFinance limits to ~60 days")
+                return '2mo'
+        
+        elif timeframe in ['1h', '4h']:
+            # Hourly data available for longer periods
+            if days_needed <= 5:
+                return '5d'
+            elif days_needed <= 30:
+                return '1mo'
+            elif days_needed <= 90:
+                return '3mo'
+            elif days_needed <= 180:
+                return '6mo'
+            elif days_needed <= 365:
+                return '1y'
+            else:
+                return '2y'
+        
+        else:  # Daily and longer timeframes
+            if days_needed <= 5:
+                return '5d'
+            elif days_needed <= 30:
+                return '1mo'
+            elif days_needed <= 90:
+                return '3mo'
+            elif days_needed <= 180:
+                return '6mo'
+            elif days_needed <= 365:
+                return '1y'
+            elif days_needed <= 730:
+                return '2y'
+            elif days_needed <= 1825:
+                return '5y'
+            else:
+                return 'max'
     
     def get_buffer_data(self, timeframe: str) -> pd.DataFrame:
         """

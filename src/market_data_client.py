@@ -19,7 +19,7 @@ class MarketDataClient:
     Supports both REST API (historical data) and WebSocket (real-time streaming).
     """
     
-    def __init__(self, exchange_name: str, symbol: str, timeframes: List[str], buffer_size: int = 200):
+    def __init__(self, exchange_name: str, symbol: str, timeframes: List[str], buffer_size: int = 500):
         """
         Initialize market data client.
         
@@ -27,7 +27,7 @@ class MarketDataClient:
             exchange_name: Name of exchange (e.g., 'binance')
             symbol: Trading pair symbol (e.g., 'BTC/USDT')
             timeframes: List of timeframes to monitor (e.g., ['1m', '5m'])
-            buffer_size: Maximum number of candles to keep in memory per timeframe
+            buffer_size: Maximum number of candles to keep in memory per timeframe (default: 500)
         """
         self.exchange_name = exchange_name
         self.symbol = symbol
@@ -86,19 +86,20 @@ class MarketDataClient:
         """Check if client is connected to exchange."""
         return self._connected
     
-    def get_latest_candles(self, timeframe: str, count: int = 200) -> pd.DataFrame:
+    def get_latest_candles(self, timeframe: str, count: int = 500) -> pd.DataFrame:
         """
-        Fetch historical candlesticks from exchange via REST API.
+        Fetch historical candlesticks from exchange via REST API with validation.
         
         Args:
             timeframe: Timeframe string (e.g., '1m', '5m')
-            count: Number of candles to fetch
+            count: Number of candles to fetch (default: 500)
             
         Returns:
             DataFrame with OHLCV data and timestamp
             
         Raises:
             RuntimeError: If not connected to exchange
+            ValueError: If fetched data is invalid
         """
         if not self._connected or self.exchange is None:
             raise RuntimeError("Not connected to exchange. Call connect() first.")
@@ -111,14 +112,42 @@ class MarketDataClient:
                 limit=count
             )
             
+            # Validate fetched data
+            if not ohlcv:
+                logger.error(f"No data returned from exchange for {timeframe}")
+                raise ValueError(f"No data returned from exchange for {timeframe}")
+            
             # Convert to DataFrame
             df = pd.DataFrame(
                 ohlcv,
                 columns=['timestamp', 'open', 'high', 'low', 'close', 'volume']
             )
             
+            # Validate DataFrame
+            if df.empty:
+                logger.error(f"Empty DataFrame after conversion for {timeframe}")
+                raise ValueError(f"Empty DataFrame for {timeframe}")
+            
+            # Check for required columns
+            required_columns = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
+            missing_columns = [col for col in required_columns if col not in df.columns]
+            if missing_columns:
+                logger.error(f"Missing columns in fetched data: {missing_columns}")
+                raise ValueError(f"Missing columns: {', '.join(missing_columns)}")
+            
             # Convert timestamp to datetime
             df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+            
+            # Check for NaN values in OHLCV columns
+            ohlcv_cols = ['open', 'high', 'low', 'close', 'volume']
+            for col in ohlcv_cols:
+                nan_count = df[col].isna().sum()
+                if nan_count > 0:
+                    logger.warning(f"{nan_count} NaN values found in '{col}' column for {timeframe}")
+            
+            # Log data quality
+            if len(df) < count:
+                logger.warning(f"Requested {count} candles but got {len(df)} for {timeframe}")
             
             # Update buffer
             with self.buffer_locks[timeframe]:
@@ -126,7 +155,7 @@ class MarketDataClient:
                 for _, row in df.iterrows():
                     self.buffers[timeframe].append(row.to_dict())
             
-            logger.info(f"Fetched {len(df)} candles for {timeframe}")
+            logger.info(f"Fetched {len(df)} candles for {timeframe} (requested: {count})")
             return df
             
         except Exception as e:

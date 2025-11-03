@@ -49,7 +49,8 @@ class BTCScalpingScanner:
         self.market_client = MarketDataClient(
             exchange_name=self.config.exchange.name,
             symbol=self.config.exchange.symbol,
-            timeframes=self.config.exchange.timeframes
+            timeframes=self.config.exchange.timeframes,
+            buffer_size=500  # Increased from 200 for better indicator calculations
         )
         
         self.indicator_calculator = IndicatorCalculator()
