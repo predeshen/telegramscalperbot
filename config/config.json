@@ -1,0 +1,50 @@
+{
+  "exchange": {
+    "name": "kraken",
+    "symbol": "BTC/USDT",
+    "timeframes": ["1m", "5m"]
+  },
+  "indicators": {
+    "ema_fast": 9,
+    "ema_slow": 21,
+    "ema_trend": 50,
+    "atr_period": 14,
+    "rsi_period": 6,
+    "volume_ma_period": 20
+  },
+  "signal_rules": {
+    "volume_spike_threshold": 1.2,
+    "rsi_min": 25,
+    "rsi_max": 75,
+    "stop_loss_atr_multiplier": 1.5,
+    "take_profit_atr_multiplier": 1.0,
+    "duplicate_time_window_minutes": 5,
+    "duplicate_price_threshold_percent": 0.3
+  },
+  "smtp": {
+    "server": "mail.hashub.co.za",
+    "port": 465,
+    "user": "alerts@hashub.co.za",
+    "password": "Password@2025#!",
+    "from_email": "alerts@hashub.co.za",
+    "to_email": "predeshen@gmail.com",
+    "use_ssl": true
+  },
+  "telegram": {
+    "enabled": true,
+    "bot_token": "8276571945:AAFKYdUCEd7Ct405K8BcBWWHyxZe5wGwo7M",
+    "chat_id": "8119046376"
+  },
+  "logging": {
+    "level": "INFO",
+    "file": "logs/scanner.log",
+    "rotation": "daily",
+    "retention_days": 7
+  },
+  "excel_reporting": {
+    "enabled": true,
+    "excel_file_path": "logs/btc_scalp_scans.xlsx",
+    "report_interval_seconds": 3600,
+    "initial_report_delay_seconds": 300
+  }
+}
