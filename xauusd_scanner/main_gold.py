@@ -176,7 +176,7 @@ def main():
     last_news_pause = False
     last_spread_pause = False
     last_heartbeat = time.time()
-    heartbeat_interval = 900  # 15 minutes in seconds
+    heartbeat_interval = 5400  # 90 minutes in seconds
     
     try:
         while True:

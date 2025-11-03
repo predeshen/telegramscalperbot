@@ -182,7 +182,7 @@ def main():
     # Track last check times to avoid duplicate signals
     last_check_times = {tf: None for tf in config['exchange']['timeframes']}
     last_heartbeat = time.time()
-    heartbeat_interval = 3600  # 60 minutes in seconds
+    heartbeat_interval = 5400  # 90 minutes in seconds
     
     try:
         while True:

@@ -189,7 +189,7 @@ class BTCScalpingScanner:
             
             # Track last heartbeat time
             last_heartbeat = time.time()
-            heartbeat_interval = 900  # 15 minutes in seconds
+            heartbeat_interval = 5400  # 90 minutes in seconds
             
             # Main loop - poll for new data every 10 seconds
             logger.info("Starting main polling loop (10-second intervals)...")
