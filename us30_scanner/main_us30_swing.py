@@ -215,7 +215,7 @@ def main():
                         candle_data[timeframe] = candles
                         
                         # Detect signals
-                        signal = signal_detector.detect_signals(candles, timeframe)
+                        signal = signal_detector.detect_signals(candles, timeframe, symbol="US30")
                         
                         # Log scan result to Excel
                         if excel_reporter and not candles.empty:

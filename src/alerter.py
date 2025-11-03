@@ -287,9 +287,10 @@ Time: {time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime())}
         
         # Format signal type with emoji
         signal_emoji = "🟢" if signal.signal_type == "LONG" else "🔴"
+        symbol = getattr(signal, 'symbol', 'BTC/USD')  # Default to BTC/USD for backward compatibility
         
         message = f"""
-{signal_emoji} *BTC/USD {signal.signal_type} SIGNAL*
+{signal_emoji} *{symbol} {signal.signal_type} SIGNAL*
 
 *📍 ENTRY LEVELS*
 Entry: ${signal.entry_price:,.2f}

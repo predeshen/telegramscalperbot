@@ -38,6 +38,8 @@ class Signal:
 
     timeframe: str
 
+    symbol: str = "BTC/USD"  # Trading symbol (e.g., "BTC/USD", "XAU/USD", "US30")
+
     entry_price: float
 
     stop_loss: float
@@ -190,7 +192,7 @@ class SignalDetector:
 
     
 
-    def detect_signals(self, data: pd.DataFrame, timeframe: str) -> Optional[Signal]:
+    def detect_signals(self, data: pd.DataFrame, timeframe: str, symbol: str = "BTC/USD") -> Optional[Signal]:
 
         """
 
@@ -203,6 +205,8 @@ class SignalDetector:
             data: DataFrame with OHLCV and calculated indicators
 
             timeframe: Timeframe string (e.g., '1m', '5m')
+
+            symbol: Trading symbol (e.g., 'BTC/USD', 'XAU/USD', 'US30')
 
             
 
@@ -226,7 +230,7 @@ class SignalDetector:
 
         # Check for bullish signal
 
-        bullish_signal = self._check_bullish_confluence(data, timeframe)
+        bullish_signal = self._check_bullish_confluence(data, timeframe, symbol)
 
         if bullish_signal and not self._is_duplicate_signal(bullish_signal):
 
@@ -240,7 +244,7 @@ class SignalDetector:
 
         # Check for bearish signal
 
-        bearish_signal = self._check_bearish_confluence(data, timeframe)
+        bearish_signal = self._check_bearish_confluence(data, timeframe, symbol)
 
         if bearish_signal and not self._is_duplicate_signal(bearish_signal):
 
@@ -254,7 +258,7 @@ class SignalDetector:
 
         # Check for trend-following signal if no crossover signal found
 
-        trend_signal = self._detect_trend_following(data, timeframe)
+        trend_signal = self._detect_trend_following(data, timeframe, symbol)
 
         if trend_signal and not self._is_duplicate_signal(trend_signal):
 
@@ -270,7 +274,7 @@ class SignalDetector:
 
     
 
-    def _check_bullish_confluence(self, data: pd.DataFrame, timeframe: str) -> Optional[Signal]:
+    def _check_bullish_confluence(self, data: pd.DataFrame, timeframe: str, symbol: str = "BTC/USD") -> Optional[Signal]:
 
         """
 
@@ -422,6 +426,8 @@ class SignalDetector:
 
                 timeframe=timeframe,
 
+                symbol=symbol,
+
                 entry_price=entry_price,
 
                 stop_loss=stop_loss,
@@ -472,7 +478,7 @@ class SignalDetector:
 
     
 
-    def _check_bearish_confluence(self, data: pd.DataFrame, timeframe: str) -> Optional[Signal]:
+    def _check_bearish_confluence(self, data: pd.DataFrame, timeframe: str, symbol: str = "BTC/USD") -> Optional[Signal]:
 
         """
 
@@ -624,6 +630,8 @@ class SignalDetector:
 
                 timeframe=timeframe,
 
+                symbol=symbol,
+
                 entry_price=entry_price,
 
                 stop_loss=stop_loss,
@@ -756,7 +764,7 @@ class SignalDetector:
 
     
 
-    def _detect_trend_following(self, data: pd.DataFrame, timeframe: str) -> Optional[Signal]:
+    def _detect_trend_following(self, data: pd.DataFrame, timeframe: str, symbol: str = "BTC/USD") -> Optional[Signal]:
 
         """
 
@@ -984,6 +992,8 @@ class SignalDetector:
 
                     timeframe=timeframe,
 
+                    symbol=symbol,
+
                     entry_price=entry_price,
 
                     stop_loss=stop_loss,
@@ -1123,6 +1133,8 @@ class SignalDetector:
                     signal_type="SHORT",
 
                     timeframe=timeframe,
+
+                    symbol=symbol,
 
                     entry_price=entry_price,
 

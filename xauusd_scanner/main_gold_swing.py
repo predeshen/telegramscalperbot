@@ -309,7 +309,7 @@ def main():
                     
                     if last_check is None or (current_time - last_check).total_seconds() >= interval:
                         # Detect signals
-                        signal = signal_detector.detect_signals(candles, timeframe)
+                        signal = signal_detector.detect_signals(candles, timeframe, symbol="XAU/USD")
                         
                         # Log scan result to Excel
                         if excel_reporter and not candles.empty:
