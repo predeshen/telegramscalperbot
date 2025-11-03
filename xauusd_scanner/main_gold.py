@@ -13,7 +13,7 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.market_data_client import MarketDataClient
+from src.yfinance_client import YFinanceClient
 from src.indicator_calculator import IndicatorCalculator
 from src.alerter import TelegramAlerter
 from src.trade_tracker import TradeTracker
@@ -71,9 +71,9 @@ def main():
     # Initialize core components
     logger.info("Initializing components...")
     
-    market_client = MarketDataClient(
-        exchange_name=config['exchange']['name'],
-        symbol=config['exchange']['symbol'],
+    # Use YFinance client for Gold data
+    market_client = YFinanceClient(
+        symbol='GC=F',  # Gold Futures
         timeframes=config['exchange']['timeframes'],
         buffer_size=200
     )
@@ -133,15 +133,17 @@ def main():
     
     logger.info("All components initialized successfully")
     
-    # Connect to exchange
-    logger.info(f"Connecting to {config['exchange']}...")
-    market_client.connect()
-    logger.info(f"Successfully connected to {config['exchange']}")
+    # Connect to data source
+    logger.info("Connecting to Yahoo Finance for Gold data...")
+    if not market_client.connect():
+        logger.error("Failed to connect to Yahoo Finance")
+        sys.exit(1)
+    logger.info("Successfully connected to Yahoo Finance")
     
     # Fetch initial data
     logger.info("Fetching initial candlestick data...")
     candle_data = {}
-    for timeframe in config['timeframes']:
+    for timeframe in config['exchange']['timeframes']:
         candles = market_client.get_latest_candles(timeframe, count=200)
         
         # Calculate indicators
@@ -163,7 +165,7 @@ def main():
             f"🟢 <b>XAU/USD Gold Scanner Started</b>\n\n"
             f"Session: {session_info['session']}\n"
             f"Strategy: {session_info['strategy_focus']}\n"
-            f"Monitoring: {', '.join(config['timeframes'])}\n\n"
+            f"Monitoring: {', '.join(config['exchange']['timeframes'])}\n\n"
             f"Ready to scan for Gold signals!"
         )
     
@@ -221,7 +223,7 @@ def main():
                 continue
             
             # Update data for each timeframe
-            for timeframe in config['timeframes']:
+            for timeframe in config['exchange']['timeframes']:
                 try:
                     # Fetch latest candles
                     candles = market_client.get_latest_candles(timeframe, count=200)
@@ -333,13 +335,8 @@ def main():
             
             # Check for trade updates
             try:
-                current_price = candle_data[config['timeframes'][0]].iloc[-1]['close']
-                updates = trade_tracker.check_for_updates(current_price)
-                
-                for update in updates:
-                    logger.info(f"📊 Trade Update: {update['message']}")
-                    if alerter:
-                        alerter.send_trade_update(update)
+                current_price = candle_data[config['exchange']['timeframes'][0]].iloc[-1]['close']
+                trade_tracker.update_trades(current_price)
             
             except Exception as e:
                 logger.error(f"Error checking trade updates: {e}")
