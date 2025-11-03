@@ -34,6 +34,10 @@
     "acceptable_pips": 10,
     "pause_pips": 15
   },
+  "scanner": {
+    "polling_interval_seconds": 15
+  },
+  "asian_polling_seconds": 30,
   "news_calendar_file": "xauusd_scanner/news_events.json",
   "telegram": {
     "enabled": true,
