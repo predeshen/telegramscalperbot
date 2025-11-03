@@ -30,6 +30,10 @@
     "newyork_start_gmt": "12:00",
     "newyork_end_gmt": "20:00"
   },
+  "spread_monitoring": {
+    "acceptable_pips": 10,
+    "pause_pips": 15
+  },
   "news_calendar_file": "xauusd_scanner/news_events.json",
   "telegram": {
     "enabled": true,
