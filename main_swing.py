@@ -157,10 +157,35 @@ def main():
         candle_data[timeframe] = candles
         logger.info(f"Loaded {timeframe} data with indicators")
     
+    # Send startup notification
+    if alerter:
+        try:
+            # Get current price from first timeframe
+            df = candle_data[config['timeframes'][0]]
+            current_price = df.iloc[-1]['close'] if not df.empty else 0
+            ema_200 = df.iloc[-1].get('ema_200', 0) if not df.empty else 0
+            
+            startup_msg = (
+                f"🟢 <b>BTC Swing Scanner Started</b>\n\n"
+                f"💰 Current Price: ${current_price:,.2f}\n"
+                f"📊 EMA 200: ${ema_200:,.2f}\n"
+                f"📈 Primary Trend: {'Bullish' if current_price > ema_200 else 'Bearish'}\n"
+                f"⏰ Timeframes: {', '.join(config['timeframes'])}\n"
+                f"🎯 Strategy: Trend Following + EMA Crossovers\n\n"
+                f"🔍 Scanning for swing opportunities..."
+            )
+            alerter.send_message(startup_msg)
+        except Exception as e:
+            logger.warning(f"Failed to send startup message: {e}")
+    
     # Main polling loop
     logger.info(f"Using polling mode for data updates (more reliable across exchanges)...")
     logger.info("Scanner is now running. Press Ctrl+C to stop.")
     logger.info(f"Starting main polling loop ({config['polling_interval_seconds']}-second intervals)...")
+    
+    # Track last heartbeat time
+    last_heartbeat = time.time()
+    heartbeat_interval = 900  # 15 minutes in seconds
     
     try:
         while True:
@@ -246,6 +271,27 @@ def main():
             
             except Exception as e:
                 logger.error(f"Error checking trade updates: {e}")
+            
+            # Check if it's time for heartbeat message (every 15 minutes)
+            current_time = time.time()
+            if current_time - last_heartbeat >= heartbeat_interval:
+                try:
+                    # Get latest data for heartbeat
+                    df = candle_data[config['timeframes'][0]]
+                    if not df.empty:
+                        last_candle = df.iloc[-1]
+                        heartbeat_msg = (
+                            f"💙 <b>BTC Swing Scanner Heartbeat</b>\n\n"
+                            f"⏰ Time: {datetime.now().strftime('%H:%M:%S UTC')}\n"
+                            f"💰 Price: ${last_candle['close']:,.2f}\n"
+                            f"📊 EMA 200: ${last_candle.get('ema_200', 0):,.2f}\n"
+                            f"📈 RSI: {last_candle.get('rsi', 0):.1f}\n"
+                            f"🔍 Status: Actively scanning..."
+                        )
+                        alerter.send_message(heartbeat_msg)
+                        last_heartbeat = current_time
+                except Exception as e:
+                    logger.warning(f"Failed to send heartbeat: {e}")
             
             # Wait before next poll
             time.sleep(config['polling_interval_seconds'])

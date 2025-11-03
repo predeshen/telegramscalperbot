@@ -166,7 +166,30 @@ class BTCScalpingScanner:
             # Set running flag
             self.running = True
             
+            # Send startup notification
+            if self.alerter:
+                try:
+                    # Get current price
+                    df = self.market_client.get_latest_candles(self.config.exchange.timeframes[0], 10)
+                    current_price = df.iloc[-1]['close'] if not df.empty else 0
+                    
+                    startup_msg = (
+                        f"🟢 <b>BTC Scalping Scanner Started</b>\n\n"
+                        f"💰 Current Price: ${current_price:,.2f}\n"
+                        f"⏰ Timeframes: {', '.join(self.config.exchange.timeframes)}\n"
+                        f"🎯 Strategy: EMA Crossover + Volume Confirmation\n"
+                        f"📊 Exchange: {self.config.exchange.name.upper()}\n\n"
+                        f"🔍 Scanning for scalping opportunities..."
+                    )
+                    self.alerter.send_message(startup_msg)
+                except Exception as e:
+                    logger.warning(f"Failed to send startup message: {e}")
+            
             logger.info("Scanner is now running. Press Ctrl+C to stop.")
+            
+            # Track last heartbeat time
+            last_heartbeat = time.time()
+            heartbeat_interval = 900  # 15 minutes in seconds
             
             # Main loop - poll for new data every 10 seconds
             logger.info("Starting main polling loop (10-second intervals)...")
@@ -249,6 +272,27 @@ class BTCScalpingScanner:
                                     if hasattr(self.alerter, 'email_alerter') and self.alerter.email_alerter:
                                         rate = self.alerter.email_alerter.get_success_rate()
                                         self.health_monitor.set_email_success_rate(rate)
+                    
+                    # Check if it's time for heartbeat message (every 15 minutes)
+                    current_time = time.time()
+                    if current_time - last_heartbeat >= heartbeat_interval:
+                        try:
+                            # Get latest data for heartbeat
+                            df = self.market_client.get_latest_candles(self.config.exchange.timeframes[0], 10)
+                            if not df.empty:
+                                last_candle = df.iloc[-1]
+                                heartbeat_msg = (
+                                    f"💚 <b>BTC Scanner Heartbeat</b>\n\n"
+                                    f"⏰ Time: {datetime.now().strftime('%H:%M:%S UTC')}\n"
+                                    f"💰 Price: ${last_candle['close']:,.2f}\n"
+                                    f"📊 Volume: {last_candle['volume']:,.0f}\n"
+                                    f"📈 RSI: {last_candle.get('rsi', 0):.1f}\n"
+                                    f"🔍 Status: Actively scanning..."
+                                )
+                                self.alerter.send_message(heartbeat_msg)
+                                last_heartbeat = current_time
+                        except Exception as e:
+                            logger.warning(f"Failed to send heartbeat: {e}")
                     
                     # Wait 10 seconds before next poll
                     time.sleep(10)
