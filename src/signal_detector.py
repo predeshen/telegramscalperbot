@@ -111,26 +111,26 @@ class SignalDetector:
         # Clean expired signals from history
         self._clean_expired_signals()
         
-        # Check for bullish signal
+        # PRIORITY 1: Check for trend-following signals (catches ongoing trends)
+        trend_signal = self._detect_trend_following(data, timeframe)
+        if trend_signal and not self._is_duplicate_signal(trend_signal):
+            self.signal_history.append(trend_signal)
+            logger.info(f"{trend_signal.signal_type} trend-following signal detected on {timeframe}: {trend_signal.entry_price}")
+            return trend_signal
+        
+        # PRIORITY 2: Check for bullish crossover signal
         bullish_signal = self._check_bullish_confluence(data, timeframe)
         if bullish_signal and not self._is_duplicate_signal(bullish_signal):
             self.signal_history.append(bullish_signal)
             logger.info(f"LONG signal detected on {timeframe}: {bullish_signal.entry_price}")
             return bullish_signal
         
-        # Check for bearish signal
+        # PRIORITY 3: Check for bearish crossover signal
         bearish_signal = self._check_bearish_confluence(data, timeframe)
         if bearish_signal and not self._is_duplicate_signal(bearish_signal):
             self.signal_history.append(bearish_signal)
             logger.info(f"SHORT signal detected on {timeframe}: {bearish_signal.entry_price}")
             return bearish_signal
-        
-        # Check for trend-following signal if no crossover signal found
-        trend_signal = self._detect_trend_following(data, timeframe)
-        if trend_signal and not self._is_duplicate_signal(trend_signal):
-            self.signal_history.append(trend_signal)
-            logger.info(f"{trend_signal.signal_type} trend-following signal detected on {timeframe}: {trend_signal.entry_price}")
-            return trend_signal
         
         return None
     
@@ -432,24 +432,19 @@ class SignalDetector:
                 logger.debug(f"Skipping trend signal: pullback too deep ({pullback_depth:.1f}%) on {timeframe}")
                 return None
             
-            # Check volume confirmation (at least 1.2x average)
-            if last['volume'] < (last['volume_ma'] * 1.2):
+            # RELAXED: Volume should be at least average (not necessarily spiking)
+            # Strong trends can continue on average volume
+            if last['volume'] < (last['volume_ma'] * 0.8):
+                logger.debug(f"Skipping trend signal: volume too low on {timeframe}")
                 return None
             
-            # Check if volume is declining (reduce confidence)
-            volume_declining = (
-                last['volume'] < prev['volume'] and
-                prev['volume'] < data.iloc[-3]['volume']
-            )
-            
-            if volume_declining:
-                logger.debug(f"Skipping trend signal: volume declining on {timeframe}")
-                return None
+            # Don't require volume spike for trend continuation
+            # Volume declining is OK as long as it's not collapsing
             
             # Detect pullback entry for uptrend
             if is_uptrend:
-                # Check RSI range (40-80 for uptrends)
-                if not (40 <= last['rsi'] <= 80):
+                # Check RSI range (35-80 for uptrends - relaxed lower bound)
+                if not (35 <= last['rsi'] <= 80):
                     return None
                 
                 # Check if price pulled back to EMA(21) and bounced
@@ -457,13 +452,23 @@ class SignalDetector:
                 if pd.isna(ema_21):
                     return None
                 
-                # Price should be near EMA(21) (within 1 ATR)
+                # RELAXED: Price should be near EMA(21) OR above it (within 2 ATR)
+                # This catches both pullback entries AND trend continuation
                 distance_from_ema = abs(last['close'] - ema_21)
-                if distance_from_ema > last['atr']:
+                if distance_from_ema > (last['atr'] * 2):
                     return None
                 
-                # Price should be bouncing up (close > open)
-                if last['close'] <= last['open']:
+                # RELAXED: Accept bullish candles OR strong upward momentum
+                # Check if we have bullish momentum (price above EMA9 and EMA21)
+                ema_9 = last.get('ema_9')
+                bullish_momentum = (
+                    last['close'] > ema_9 and
+                    last['close'] > ema_21 and
+                    ema_9 > ema_21
+                )
+                
+                # Accept if either: bullish candle OR strong bullish momentum
+                if not (last['close'] > last['open'] or bullish_momentum):
                     return None
                 
                 # Generate LONG signal
@@ -518,8 +523,8 @@ class SignalDetector:
             
             # Detect pullback entry for downtrend
             elif is_downtrend:
-                # Check RSI range (20-60 for downtrends)
-                if not (20 <= last['rsi'] <= 60):
+                # Check RSI range (20-65 for downtrends - relaxed upper bound)
+                if not (20 <= last['rsi'] <= 65):
                     return None
                 
                 # Check if price rallied to EMA(21) and rejected
@@ -527,13 +532,23 @@ class SignalDetector:
                 if pd.isna(ema_21):
                     return None
                 
-                # Price should be near EMA(21) (within 1 ATR)
+                # RELAXED: Price should be near EMA(21) OR below it (within 2 ATR)
+                # This catches both pullback entries AND trend continuation
                 distance_from_ema = abs(last['close'] - ema_21)
-                if distance_from_ema > last['atr']:
+                if distance_from_ema > (last['atr'] * 2):
                     return None
                 
-                # Price should be rejecting down (close < open)
-                if last['close'] >= last['open']:
+                # RELAXED: Accept bearish candles OR strong downward momentum
+                # Check if we have bearish momentum (price below EMA9 and EMA21)
+                ema_9 = last.get('ema_9')
+                bearish_momentum = (
+                    last['close'] < ema_9 and
+                    last['close'] < ema_21 and
+                    ema_9 < ema_21
+                )
+                
+                # Accept if either: bearish candle OR strong bearish momentum
+                if not (last['close'] < last['open'] or bearish_momentum):
                     return None
                 
                 # Generate SHORT signal
