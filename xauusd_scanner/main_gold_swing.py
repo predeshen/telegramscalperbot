@@ -382,12 +382,7 @@ def main():
             # Check for trade updates
             try:
                 current_price = candle_data[config['exchange']['timeframes'][0]].iloc[-1]['close']
-                updates = trade_tracker.check_for_updates(current_price)
-                
-                for update in updates:
-                    logger.info(f"📊 Trade Update: {update['message']}")
-                    if alerter:
-                        alerter.send_trade_update(update)
+                trade_tracker.update_trades(current_price)
             
             except Exception as e:
                 logger.error(f"Error checking trade updates: {e}")

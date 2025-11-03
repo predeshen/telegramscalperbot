@@ -11,6 +11,7 @@ from datetime import datetime
 from pathlib import Path
 
 from src.market_data_client import MarketDataClient
+from src.indicator_calculator import IndicatorCalculator
 from src.signal_detector import SignalDetector
 from src.alerter import TelegramAlerter
 from src.trade_tracker import TradeTracker
@@ -71,6 +72,8 @@ def main():
         buffer_size=200
     )
     
+    indicator_calc = IndicatorCalculator()
+    
     signal_detector = SignalDetector(
         volume_spike_threshold=config['signal_detection']['volume_spike_threshold'],
         rsi_min=config['signal_detection']['rsi_min'],
@@ -127,8 +130,20 @@ def main():
     for timeframe in config['timeframes']:
         logger.info(f"Fetching initial candlestick data for {timeframe}...")
         candles = market_client.get_latest_candles(timeframe, count=200)
+        
+        # Calculate indicators
+        candles['ema_9'] = indicator_calc.calculate_ema(candles, 9)
+        candles['ema_21'] = indicator_calc.calculate_ema(candles, 21)
+        candles['ema_50'] = indicator_calc.calculate_ema(candles, 50)
+        candles['ema_100'] = indicator_calc.calculate_ema(candles, 100)
+        candles['ema_200'] = indicator_calc.calculate_ema(candles, 200)
+        candles['vwap'] = indicator_calc.calculate_vwap(candles)
+        candles['atr'] = indicator_calc.calculate_atr(candles, 14)
+        candles['rsi'] = indicator_calc.calculate_rsi(candles, 14)
+        candles['volume_ma'] = indicator_calc.calculate_volume_ma(candles, 20)
+        
         candle_data[timeframe] = candles
-        logger.info(f"Loaded {timeframe} data")
+        logger.info(f"Loaded {timeframe} data with indicators")
     
     # Main polling loop
     logger.info(f"Using polling mode for data updates (more reliable across exchanges)...")
@@ -142,6 +157,18 @@ def main():
                 try:
                     # Fetch latest candles
                     candles = market_client.get_latest_candles(timeframe, count=200)
+                    
+                    # Calculate indicators
+                    candles['ema_9'] = indicator_calc.calculate_ema(candles, 9)
+                    candles['ema_21'] = indicator_calc.calculate_ema(candles, 21)
+                    candles['ema_50'] = indicator_calc.calculate_ema(candles, 50)
+                    candles['ema_100'] = indicator_calc.calculate_ema(candles, 100)
+                    candles['ema_200'] = indicator_calc.calculate_ema(candles, 200)
+                    candles['vwap'] = indicator_calc.calculate_vwap(candles)
+                    candles['atr'] = indicator_calc.calculate_atr(candles, 14)
+                    candles['rsi'] = indicator_calc.calculate_rsi(candles, 14)
+                    candles['volume_ma'] = indicator_calc.calculate_volume_ma(candles, 20)
+                    
                     candle_data[timeframe] = candles
                     
                     # Detect signals
@@ -203,12 +230,7 @@ def main():
             # Check for trade updates
             try:
                 current_price = candle_data[config['timeframes'][0]].iloc[-1]['close']
-                updates = trade_tracker.check_for_updates(current_price)
-                
-                for update in updates:
-                    logger.info(f"📊 Trade Update: {update['message']}")
-                    if alerter:
-                        alerter.send_trade_update(update)
+                trade_tracker.update_trades(current_price)
             
             except Exception as e:
                 logger.error(f"Error checking trade updates: {e}")
