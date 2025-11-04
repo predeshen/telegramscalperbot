@@ -14,6 +14,7 @@ from src.signal_detector import SignalDetector
 from src.alerter import EmailAlerter, TelegramAlerter, MultiAlerter
 from src.health_monitor import HealthMonitor, setup_logging
 from src.excel_reporter import ExcelReporter
+from src.trade_tracker import TradeTracker
 
 
 logger = logging.getLogger(__name__)
@@ -102,6 +103,9 @@ class BTCScalpingScanner:
         
         # Health monitoring thread
         self.health_thread = None
+        
+        # Trade tracker
+        self.trade_tracker = TradeTracker(alerter=self.alerter)
         
         # Excel reporter
         self.excel_reporter = None
@@ -265,6 +269,9 @@ class BTCScalpingScanner:
                                     
                                     if alert_success:
                                         logger.info("Alert sent successfully")
+                                        
+                                        # Add trade to tracker
+                                        self.trade_tracker.add_trade(signal)
                                     else:
                                         logger.error("Failed to send alert")
                                     
@@ -272,6 +279,21 @@ class BTCScalpingScanner:
                                     if hasattr(self.alerter, 'email_alerter') and self.alerter.email_alerter:
                                         rate = self.alerter.email_alerter.get_success_rate()
                                         self.health_monitor.set_email_success_rate(rate)
+                                
+                                # Update active trades with current price and indicators
+                                if not data_with_indicators.empty:
+                                    last_row = data_with_indicators.iloc[-1]
+                                    current_price = last_row['close']
+                                    
+                                    # Prepare indicators for TP extension logic
+                                    indicators = {
+                                        'rsi': last_row.get('rsi', 50),
+                                        'prev_rsi': data_with_indicators.iloc[-2].get('rsi', 50) if len(data_with_indicators) > 1 else 50,
+                                        'adx': last_row.get('adx', 0),
+                                        'volume_ratio': last_row['volume'] / last_row['volume_ma'] if last_row.get('volume_ma', 0) > 0 else 0
+                                    }
+                                    
+                                    self.trade_tracker.update_trades(current_price, indicators)
                     
                     # Check if it's time for heartbeat message (every 15 minutes)
                     current_time = time.time()
