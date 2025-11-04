@@ -195,6 +195,114 @@ class US30SwingDetector:
             logger.error(f"Error in momentum shift detection: {e}", exc_info=True)
             return None
     
+    def _detect_momentum_shift(self, data: pd.DataFrame, timeframe: str, symbol: str = "US30") -> Optional[US30SwingSignal]:
+        """
+        Detect Momentum Shift signals - catches RSI turning with ADX confirmation.
+        
+        Strategy:
+        - Uses RSI(7) for faster momentum detection
+        - Bullish: RSI turning up (increasing over last 2-3 candles)
+        - Bearish: RSI turning down (decreasing over last 2-3 candles)
+        - ADX >= 18 (trend forming, not flat)
+        - Volume >= 0.8x average
+        
+        Args:
+            data: DataFrame with indicators
+            timeframe: Timeframe string
+            symbol: Trading symbol
+            
+        Returns:
+            US30SwingSignal if detected, None otherwise
+        """
+        try:
+            if len(data) < 4:
+                return None
+            
+            last = data.iloc[-1]
+            prev = data.iloc[-2]
+            prev2 = data.iloc[-3]
+            
+            # Check for required indicators
+            required_indicators = ['rsi_7', 'adx', 'volume', 'volume_ma', 'atr']
+            if not all(ind in last.index for ind in required_indicators):
+                logger.debug(f"[{timeframe}] Missing required indicators for momentum shift detection")
+                return None
+            
+            # Check ADX >= 18 (trend forming)
+            if last['adx'] < 18:
+                logger.debug(f"[{timeframe}] ADX too low: {last['adx']:.1f} (need >= 18 for momentum shift)")
+                return None
+            
+            # Calculate volume ratio
+            volume_ratio = last['volume'] / last['volume_ma']
+            
+            # Check volume threshold (0.8x average)
+            if volume_ratio < self.config.get('volume_spike_threshold', 0.8):
+                logger.debug(f"[{timeframe}] Volume too low: {volume_ratio:.2f}x (need >= {self.config.get('volume_spike_threshold', 0.8)}x)")
+                return None
+            
+            # Check for RSI(7) turning up (bullish momentum shift)
+            rsi_7_current = last['rsi_7']
+            rsi_7_prev = prev['rsi_7']
+            rsi_7_prev2 = prev2['rsi_7']
+            
+            # Bullish Momentum Shift: RSI(7) turning up
+            if rsi_7_current > rsi_7_prev and rsi_7_prev > rsi_7_prev2:
+                logger.info(f"[{timeframe}] Bullish momentum shift detected - RSI(7): {rsi_7_prev2:.1f} -> {rsi_7_prev:.1f} -> {rsi_7_current:.1f} (turning up)")
+                logger.info(f"[{timeframe}] ADX: {last['adx']:.1f}, Volume: {volume_ratio:.2f}x")
+                
+                entry = last['close']
+                stop_loss = entry - (last['atr'] * self.config['stop_loss_atr_multiplier'])
+                take_profit = entry + (last['atr'] * self.config['take_profit_atr_multiplier'])
+                
+                signal = self._create_signal(
+                    timestamp=last['timestamp'],
+                    signal_type="LONG",
+                    timeframe=timeframe,
+                    entry_price=entry,
+                    stop_loss=stop_loss,
+                    take_profit=take_profit,
+                    indicators=last,
+                    strategy="Momentum Shift (Bullish RSI Turn)",
+                    symbol=symbol,
+                    trend_alignment="rsi_turning_up"
+                )
+                
+                return signal
+            
+            # Bearish Momentum Shift: RSI(7) turning down
+            elif rsi_7_current < rsi_7_prev and rsi_7_prev < rsi_7_prev2:
+                logger.info(f"[{timeframe}] Bearish momentum shift detected - RSI(7): {rsi_7_prev2:.1f} -> {rsi_7_prev:.1f} -> {rsi_7_current:.1f} (turning down)")
+                logger.info(f"[{timeframe}] ADX: {last['adx']:.1f}, Volume: {volume_ratio:.2f}x")
+                
+                entry = last['close']
+                stop_loss = entry + (last['atr'] * self.config['stop_loss_atr_multiplier'])
+                take_profit = entry - (last['atr'] * self.config['take_profit_atr_multiplier'])
+                
+                signal = self._create_signal(
+                    timestamp=last['timestamp'],
+                    signal_type="SHORT",
+                    timeframe=timeframe,
+                    entry_price=entry,
+                    stop_loss=stop_loss,
+                    take_profit=take_profit,
+                    indicators=last,
+                    strategy="Momentum Shift (Bearish RSI Turn)",
+                    symbol=symbol,
+                    trend_alignment="rsi_turning_down"
+                )
+                
+                return signal
+            
+            else:
+                logger.debug(f"[{timeframe}] No momentum shift: RSI(7) {rsi_7_prev2:.1f} -> {rsi_7_prev:.1f} -> {rsi_7_current:.1f}")
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error in momentum shift detection: {e}", exc_info=True)
+            return None
+    
     def _detect_trend_alignment(self, data: pd.DataFrame, timeframe: str, symbol: str = "US30") -> Optional[US30SwingSignal]:
         """
         Detect Trend Alignment signals.
