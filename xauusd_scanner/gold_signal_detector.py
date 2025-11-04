@@ -194,13 +194,14 @@ class GoldSignalDetector:
                 stop_loss = entry - (last['atr'] * 2.0)
                 take_profit = entry + (last['atr'] * 3.0)
                 
-                signal = self._create_signal(
+                signal = self._create_gold_signal(
                     timestamp=last['timestamp'],
                     signal_type="LONG",
                     timeframe=timeframe,
                     entry_price=entry,
                     stop_loss=stop_loss,
                     take_profit=take_profit,
+                    atr=last['atr'],
                     indicators=last,
                     strategy="Momentum Shift (Bullish RSI Turn)"
                 )
@@ -216,13 +217,14 @@ class GoldSignalDetector:
                 stop_loss = entry + (last['atr'] * 2.0)
                 take_profit = entry - (last['atr'] * 3.0)
                 
-                signal = self._create_signal(
+                signal = self._create_gold_signal(
                     timestamp=last['timestamp'],
                     signal_type="SHORT",
                     timeframe=timeframe,
                     entry_price=entry,
                     stop_loss=stop_loss,
                     take_profit=take_profit,
+                    atr=last['atr'],
                     indicators=last,
                     strategy="Momentum Shift (Bearish RSI Turn)"
                 )
