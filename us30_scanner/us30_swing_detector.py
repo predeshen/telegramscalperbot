@@ -143,9 +143,10 @@ class US30SwingDetector:
                 logger.debug(f"[{timeframe}] Missing required indicators for momentum shift detection")
                 return None
             
-            # Check ADX > 18 (trend forming)
-            if last['adx'] < 18:
-                logger.debug(f"[{timeframe}] ADX too low: {last['adx']:.1f} (need >= 18 for momentum shift)")
+            # Check ADX threshold (more conservative for momentum shift)
+            adx_threshold = self.config.get('adx_min_momentum_shift', 22)
+            if last['adx'] < adx_threshold:
+                logger.debug(f"[{timeframe}] ADX too low: {last['adx']:.1f} (need >= {adx_threshold} for momentum shift)")
                 return None
             
             # Calculate volume ratio
@@ -156,18 +157,30 @@ class US30SwingDetector:
                 logger.debug(f"[{timeframe}] Volume too low: {volume_ratio:.2f}x (need >= {self.config.get('volume_spike_threshold', 0.8)}x)")
                 return None
             
-            # Check for RSI turning UP (Bullish Momentum Shift)
+            # Check for RSI turning UP (Bullish Momentum Shift) - more conservative
+            rsi_momentum_threshold = self.config.get('rsi_momentum_threshold', 3.0)
             rsi_increasing = (last['rsi'] > prev['rsi'] and 
-                            prev['rsi'] > prev2['rsi'])
+                            prev['rsi'] > prev2['rsi'] and
+                            (last['rsi'] - prev2['rsi']) >= rsi_momentum_threshold)
             
-            # Check for RSI turning DOWN (Bearish Momentum Shift)
+            # Check for RSI turning DOWN (Bearish Momentum Shift) - more conservative  
             rsi_decreasing = (last['rsi'] < prev['rsi'] and 
-                            prev['rsi'] < prev2['rsi'])
+                            prev['rsi'] < prev2['rsi'] and
+                            (prev2['rsi'] - last['rsi']) >= rsi_momentum_threshold)
             
             # Bullish Momentum Shift
             if rsi_increasing:
                 # RSI should be coming from oversold or neutral (not already overbought)
                 if last['rsi'] < 70:
+                    # Optional: Add price confirmation (break above previous high)
+                    price_confirmation = True
+                    if self.config.get('require_price_confirmation', False):
+                        # For bullish signal, current close should be above previous candle's high
+                        price_confirmation = last['close'] > prev['high']
+                        if not price_confirmation:
+                            logger.debug(f"[{timeframe}] Bullish momentum shift lacks price confirmation - waiting for break above {prev['high']:.2f}")
+                            return None
+                    
                     logger.info(f"[{timeframe}] Bullish momentum shift detected - RSI turning up: {prev2['rsi']:.1f} -> {prev['rsi']:.1f} -> {last['rsi']:.1f}, ADX: {last['adx']:.1f}, Volume: {volume_ratio:.2f}x")
                     
                     entry = last['close']
@@ -193,6 +206,15 @@ class US30SwingDetector:
             elif rsi_decreasing:
                 # RSI should be coming from overbought or neutral (not already oversold)
                 if last['rsi'] > 30:
+                    # Optional: Add price confirmation (break below previous low)
+                    price_confirmation = True
+                    if self.config.get('require_price_confirmation', False):
+                        # For bearish signal, current close should be below previous candle's low
+                        price_confirmation = last['close'] < prev['low']
+                        if not price_confirmation:
+                            logger.debug(f"[{timeframe}] Bearish momentum shift lacks price confirmation - waiting for break below {prev['low']:.2f}")
+                            return None
+                    
                     logger.info(f"[{timeframe}] Bearish momentum shift detected - RSI turning down: {prev2['rsi']:.1f} -> {prev['rsi']:.1f} -> {last['rsi']:.1f}, ADX: {last['adx']:.1f}, Volume: {volume_ratio:.2f}x")
                     
                     entry = last['close']
