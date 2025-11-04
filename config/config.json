@@ -13,13 +13,15 @@
     "volume_ma_period": 20
   },
   "signal_rules": {
-    "volume_spike_threshold": 1.2,
-    "rsi_min": 25,
-    "rsi_max": 75,
+    "volume_spike_threshold": 0.8,
+    "rsi_min": 5,
+    "rsi_max": 95,
     "stop_loss_atr_multiplier": 1.5,
     "take_profit_atr_multiplier": 1.0,
     "duplicate_time_window_minutes": 5,
-    "duplicate_price_threshold_percent": 0.3
+    "duplicate_price_threshold_percent": 0.3,
+    "adx_min_trend": 20,
+    "enable_extreme_rsi_signals": true
   },
   "smtp": {
     "server": "mail.hashub.co.za",

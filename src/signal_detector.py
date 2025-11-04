@@ -279,6 +279,14 @@ class SignalDetector:
 
         
 
+        # Check for extreme RSI reversal signals (like the BTC drop)
+        if self.config.get('signal_rules', {}).get('enable_extreme_rsi_signals', False):
+            extreme_rsi_signal = self._detect_extreme_rsi_reversal(data, timeframe, symbol)
+            if extreme_rsi_signal and not self._is_duplicate_signal(extreme_rsi_signal):
+                self.signal_history.append(extreme_rsi_signal)
+                logger.info(f"{extreme_rsi_signal.signal_type} extreme RSI signal detected on {timeframe}: {extreme_rsi_signal.entry_price}")
+                return extreme_rsi_signal
+
         # Check for H4 HVG signal on 4-hour timeframe
         if timeframe == '4h':
             hvg_signal = self._detect_h4_hvg(data, timeframe, symbol)
@@ -1516,3 +1524,160 @@ class SignalDetector:
 
         return "\n".join(reasons)
 
+    def _detect_extreme_rsi_reversal(self, data: pd.DataFrame, timeframe: str, symbol: str) -> Optional[Signal]:
+        """
+        Detect extreme RSI reversal signals for strong momentum moves.
+        
+        This catches signals like the BTC drop where RSI goes to extreme levels
+        with strong ADX indicating a powerful trend that may continue.
+        
+        Args:
+            data: DataFrame with OHLCV and indicators
+            timeframe: Timeframe string
+            symbol: Trading symbol
+            
+        Returns:
+            Signal object if detected, None otherwise
+        """
+        try:
+            if len(data) < 3:
+                return None
+            
+            last = data.iloc[-1]
+            prev = data.iloc[-2]
+            
+            # Check for required indicators
+            required_indicators = ['rsi', 'adx', 'atr', 'volume', 'volume_ma']
+            if not all(ind in last.index for ind in required_indicators):
+                return None
+            
+            # Get configuration
+            adx_min = self.config.get('signal_rules', {}).get('adx_min_trend', 20)
+            volume_threshold = self.config.get('signal_rules', {}).get('volume_spike_threshold', 0.8)
+            
+            # Check for strong trend (high ADX)
+            if last['adx'] < adx_min:
+                return None
+            
+            # Check volume
+            volume_ratio = last['volume'] / last['volume_ma']
+            if volume_ratio < volume_threshold:
+                return None
+            
+            # Extreme oversold with strong bearish momentum (like BTC drop)
+            if (last['rsi'] <= 15 and  # Extremely oversold
+                last['rsi'] < prev['rsi'] and  # Still declining
+                last['adx'] > 30):  # Strong trend
+                
+                logger.info(f"[{timeframe}] Extreme RSI bearish continuation detected - RSI: {last['rsi']:.1f}, ADX: {last['adx']:.1f}, Volume: {volume_ratio:.2f}x")
+                
+                entry = last['close']
+                stop_loss = entry + (last['atr'] * self.config['signal_rules']['stop_loss_atr_multiplier'])
+                take_profit = entry - (last['atr'] * self.config['signal_rules']['take_profit_atr_multiplier'])
+                
+                # Calculate risk/reward
+                risk = abs(stop_loss - entry)
+                reward = abs(entry - take_profit)
+                risk_reward = reward / risk if risk > 0 else 0
+                
+                # Generate reasoning
+                reasoning = f"""🔥 EXTREME RSI BEARISH MOMENTUM 🔥
+                
+📉 OVERSOLD CONTINUATION SIGNAL:
+• RSI at extreme level: {last['rsi']:.1f} (< 15)
+• Strong bearish trend: ADX {last['adx']:.1f} (> 30)
+• Volume confirmation: {volume_ratio:.2f}x average
+• Price momentum: Still declining
+
+⚡ MOMENTUM ANALYSIS:
+• This is NOT a reversal signal - it's a continuation
+• Extreme RSI with high ADX = powerful trend in motion
+• Volume confirms institutional participation
+• Similar to major market crashes/breakdowns
+
+🎯 TRADE RATIONALE:
+• Ride the momentum while it's strong
+• Exit when RSI starts to recover or ADX weakens
+• High probability continuation pattern
+• Risk/Reward: {risk_reward:.2f}:1"""
+
+                signal = Signal(
+                    timestamp=last['timestamp'],
+                    signal_type="SHORT",
+                    timeframe=timeframe,
+                    entry_price=entry,
+                    stop_loss=stop_loss,
+                    take_profit=take_profit,
+                    atr=last['atr'],
+                    risk_reward=risk_reward,
+                    market_bias="bearish",
+                    confidence=4,  # High confidence for extreme moves
+                    indicators=last.to_dict(),
+                    reasoning=reasoning,
+                    symbol=symbol,
+                    strategy="Extreme RSI Continuation"
+                )
+                
+                return signal
+            
+            # Extreme overbought with strong bullish momentum
+            elif (last['rsi'] >= 85 and  # Extremely overbought
+                  last['rsi'] > prev['rsi'] and  # Still rising
+                  last['adx'] > 30):  # Strong trend
+                
+                logger.info(f"[{timeframe}] Extreme RSI bullish continuation detected - RSI: {last['rsi']:.1f}, ADX: {last['adx']:.1f}, Volume: {volume_ratio:.2f}x")
+                
+                entry = last['close']
+                stop_loss = entry - (last['atr'] * self.config['signal_rules']['stop_loss_atr_multiplier'])
+                take_profit = entry + (last['atr'] * self.config['signal_rules']['take_profit_atr_multiplier'])
+                
+                # Calculate risk/reward
+                risk = abs(stop_loss - entry)
+                reward = abs(take_profit - entry)
+                risk_reward = reward / risk if risk > 0 else 0
+                
+                # Generate reasoning
+                reasoning = f"""🚀 EXTREME RSI BULLISH MOMENTUM 🚀
+                
+📈 OVERBOUGHT CONTINUATION SIGNAL:
+• RSI at extreme level: {last['rsi']:.1f} (> 85)
+• Strong bullish trend: ADX {last['adx']:.1f} (> 30)
+• Volume confirmation: {volume_ratio:.2f}x average
+• Price momentum: Still rising
+
+⚡ MOMENTUM ANALYSIS:
+• This is NOT a reversal signal - it's a continuation
+• Extreme RSI with high ADX = powerful trend in motion
+• Volume confirms institutional participation
+• Similar to major market rallies/breakouts
+
+🎯 TRADE RATIONALE:
+• Ride the momentum while it's strong
+• Exit when RSI starts to cool or ADX weakens
+• High probability continuation pattern
+• Risk/Reward: {risk_reward:.2f}:1"""
+
+                signal = Signal(
+                    timestamp=last['timestamp'],
+                    signal_type="LONG",
+                    timeframe=timeframe,
+                    entry_price=entry,
+                    stop_loss=stop_loss,
+                    take_profit=take_profit,
+                    atr=last['atr'],
+                    risk_reward=risk_reward,
+                    market_bias="bullish",
+                    confidence=4,  # High confidence for extreme moves
+                    indicators=last.to_dict(),
+                    reasoning=reasoning,
+                    symbol=symbol,
+                    strategy="Extreme RSI Continuation"
+                )
+                
+                return signal
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error in extreme RSI detection: {e}", exc_info=True)
+            return None
