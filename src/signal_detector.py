@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 
 from collections import deque
 
-from typing import Optional, Dict
+from typing import Optional, Dict, List
 
 import pandas as pd
 
@@ -15,6 +15,8 @@ import logging
 
 
 from src.trend_analyzer import TrendAnalyzer
+
+from src.h4_hvg_detector import GapInfo, H4HVGDetector
 
 
 
@@ -50,6 +52,11 @@ class Signal:
     swing_points: Optional[int] = None  # Number of swing highs/lows for trend signals
 
     pullback_depth: Optional[float] = None  # Pullback percentage for trend signals
+    
+    # H4 HVG specific fields
+    gap_info: Optional['GapInfo'] = None  # Gap information for H4 HVG signals
+    volume_spike_ratio: Optional[float] = None  # Volume spike ratio for H4 HVG signals
+    confluence_factors: Optional[List[str]] = None  # List of confluence factors
 
     
 
@@ -170,10 +177,27 @@ class SignalDetector:
         # Signal history for duplicate detection
 
         self.signal_history: deque = deque(maxlen=50)
+        
+        # H4 HVG detector (will be initialized when needed)
+        self.h4_hvg_detector = None
 
         
 
         logger.info("Initialized SignalDetector with confluence rules")
+    
+    def configure_h4_hvg(self, h4_hvg_config: dict, symbol: str) -> None:
+        """
+        Configure H4 HVG detector with specific settings.
+        
+        Args:
+            h4_hvg_config: H4 HVG configuration dictionary
+            symbol: Trading symbol
+        """
+        try:
+            self.h4_hvg_detector = H4HVGDetector(config=h4_hvg_config, symbol=symbol)
+            logger.info(f"H4HVGDetector configured for {symbol}")
+        except Exception as e:
+            logger.error(f"Error configuring H4HVGDetector: {e}")
 
     
 
@@ -255,7 +279,54 @@ class SignalDetector:
 
         
 
+        # Check for H4 HVG signal on 4-hour timeframe
+        if timeframe == '4h':
+            hvg_signal = self._detect_h4_hvg(data, timeframe, symbol)
+            if hvg_signal and not self._is_duplicate_signal(hvg_signal):
+                self.signal_history.append(hvg_signal)
+                logger.info(f"H4 HVG {hvg_signal.signal_type} signal detected on {timeframe}: {hvg_signal.entry_price}")
+                return hvg_signal
+
         return None
+    
+    def _detect_h4_hvg(self, data: pd.DataFrame, timeframe: str, symbol: str) -> Optional[Signal]:
+        """
+        Detect H4 HVG signals using the H4HVGDetector.
+        
+        Args:
+            data: DataFrame with OHLCV and indicators
+            timeframe: Timeframe string
+            symbol: Trading symbol
+            
+        Returns:
+            Signal object if H4 HVG detected, None otherwise
+        """
+        try:
+            # Initialize H4 HVG detector if not already done
+            if self.h4_hvg_detector is None:
+                # Use default configuration for now
+                # In production, this should come from the main configuration
+                self.h4_hvg_detector = H4HVGDetector(symbol=symbol)
+                logger.info(f"Initialized H4HVGDetector for {symbol}")
+            
+            # Generate H4 HVG signal
+            signal = self.h4_hvg_detector.generate_h4_hvg_signal(data, timeframe, symbol)
+            
+            if signal:
+                # Check for duplicates using H4 HVG detector's own duplicate detection
+                if not self.h4_hvg_detector.is_duplicate_signal(signal):
+                    # Add to H4 HVG detector's history
+                    self.h4_hvg_detector.add_signal_to_history(signal)
+                    return signal
+                else:
+                    logger.debug("H4 HVG signal rejected as duplicate")
+                    return None
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error detecting H4 HVG signal: {e}")
+            return None
 
     
 

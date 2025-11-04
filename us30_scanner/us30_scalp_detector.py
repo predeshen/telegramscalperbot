@@ -1,6 +1,6 @@
 """
 US30 Scalping Signal Detector
-Implements "Liquidity Sweep + Impulse Confirmation" and "Trend Pullback" strategies
+Implements "Liquidity Sweep + Impulse Confirmation", "Trend Pullback", and "H4 HVG" strategies
 """
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -10,6 +10,7 @@ import numpy as np
 import logging
 
 from src.signal_detector import Signal
+from src.h4_hvg_detector import H4HVGDetector
 
 logger = logging.getLogger(__name__)
 
@@ -29,36 +30,61 @@ class US30ScalpDetector:
     Strategies:
     1. Liquidity Sweep + Impulse - Catches post-sweep momentum
     2. Trend Pullback - Enters on pullbacks to dynamic support/resistance
+    3. H4 HVG - 4-Hour High Volume Gap detection
     """
     
-    def __init__(self, config: dict):
+    def __init__(self, config: dict, h4_hvg_config: Optional[Dict] = None):
         """
         Initialize US30 Scalp Detector.
         
         Args:
             config: Configuration dictionary with signal rules
+            h4_hvg_config: H4 HVG configuration dictionary
         """
         self.config = config
+        
+        # Initialize H4 HVG detector if config provided
+        self.h4_hvg_detector = None
+        if h4_hvg_config:
+            self.h4_hvg_detector = H4HVGDetector(config=h4_hvg_config, symbol="US30")
+            logger.info("H4HVGDetector initialized for US30 with US30 market settings")
         
         # Signal history for duplicate prevention
         self.recent_signals = []
         self.duplicate_window_minutes = config.get('duplicate_time_window_minutes', 15)
         
-        logger.info("US30ScalpDetector initialized")
+        strategy_count = 3 if self.h4_hvg_detector else 2
+        logger.info(f"US30ScalpDetector initialized with {strategy_count} strategies")
     
-    def detect_signals(self, data: pd.DataFrame, timeframe: str) -> Optional[US30ScalpSignal]:
+    def detect_signals(self, data: pd.DataFrame, timeframe: str, symbol: str = "US30") -> Optional[US30ScalpSignal]:
         """
         Detect scalping signals.
         
         Args:
             data: DataFrame with OHLCV and indicators
             timeframe: Timeframe string
+            symbol: Trading symbol (for H4 HVG detection)
             
         Returns:
             US30ScalpSignal if detected, None otherwise
         """
         if data.empty or len(data) < 50:
             return None
+        
+        # Check for H4 HVG signal first on 4-hour timeframe
+        if timeframe == '4h' and self.h4_hvg_detector:
+            hvg_signal = self.h4_hvg_detector.generate_h4_hvg_signal(data, timeframe, symbol)
+            if hvg_signal:
+                # Check for duplicates using H4 HVG detector's own duplicate detection
+                if not self.h4_hvg_detector.is_duplicate_signal(hvg_signal):
+                    # Add to H4 HVG detector's history
+                    self.h4_hvg_detector.add_signal_to_history(hvg_signal)
+                    
+                    # Convert to US30ScalpSignal
+                    us30_signal = self._convert_to_us30_signal(hvg_signal)
+                    
+                    logger.info(f"🎯 {us30_signal.signal_type} signal: H4 HVG on {timeframe}")
+                    return us30_signal
         
         # Try momentum shift first (catches RSI turning with ADX > 18)
         signal = self._detect_momentum_shift(data, timeframe)
@@ -449,6 +475,48 @@ class US30ScalpDetector:
         reasons.append(f"   • Tight stop: {self.config['stop_loss_points']} points")
         
         return "\n".join(reasons)
+    
+    def _convert_to_us30_signal(self, hvg_signal) -> US30ScalpSignal:
+        """
+        Convert H4 HVG Signal to US30ScalpSignal with US30-specific context.
+        
+        Args:
+            hvg_signal: H4 HVG Signal object
+            
+        Returns:
+            US30ScalpSignal with US30-specific enhancements
+        """
+        # Calculate VWAP distance if available
+        vwap_distance = 0
+        if hvg_signal.indicators and 'vwap' in hvg_signal.indicators:
+            vwap = hvg_signal.indicators['vwap']
+            if vwap and vwap > 0:
+                vwap_distance = ((hvg_signal.entry_price - vwap) / vwap) * 100
+        
+        # Create US30ScalpSignal from H4 HVG signal
+        us30_signal = US30ScalpSignal(
+            timestamp=hvg_signal.timestamp,
+            signal_type=hvg_signal.signal_type,
+            timeframe=hvg_signal.timeframe,
+            symbol=hvg_signal.symbol,
+            entry_price=hvg_signal.entry_price,
+            stop_loss=hvg_signal.stop_loss,
+            take_profit=hvg_signal.take_profit,
+            atr=hvg_signal.atr,
+            risk_reward=hvg_signal.risk_reward,
+            market_bias=hvg_signal.market_bias,
+            confidence=hvg_signal.confidence,
+            indicators=hvg_signal.indicators,
+            reasoning=hvg_signal.reasoning,
+            strategy=hvg_signal.strategy,
+            gap_info=hvg_signal.gap_info,
+            volume_spike_ratio=hvg_signal.volume_spike_ratio,
+            confluence_factors=hvg_signal.confluence_factors,
+            stochastic_value=hvg_signal.indicators.get('stoch_k') if hvg_signal.indicators else None,
+            vwap_distance=vwap_distance
+        )
+        
+        return us30_signal
     
     def _is_duplicate(self, signal: US30ScalpSignal) -> bool:
         """Check if signal is duplicate of recent signal."""

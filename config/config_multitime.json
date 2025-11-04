@@ -39,5 +39,19 @@
       "to_email": "predeshen@gmail.com",
       "use_ssl": true
     }
+  },
+  "h4_hvg": {
+    "enabled": true,
+    "min_gap_percent": 0.15,
+    "volume_spike_threshold": 1.5,
+    "atr_multiplier_sl": 1.5,
+    "gap_target_multiplier": 2.0,
+    "min_risk_reward": 1.5,
+    "max_gap_age_candles": 3,
+    "rsi_min": 30,
+    "rsi_max": 70,
+    "require_ema_confluence": true,
+    "duplicate_time_window_minutes": 240,
+    "duplicate_price_threshold_percent": 0.5
   }
 }

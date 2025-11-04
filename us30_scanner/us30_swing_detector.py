@@ -1,6 +1,6 @@
 """
 US30 Swing Trading Signal Detector
-Implements "Trend Reversal & Continuation" and "Moving Average Pullback" strategies
+Implements "Trend Reversal & Continuation", "Moving Average Pullback", and "H4 HVG" strategies
 """
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -10,6 +10,7 @@ import numpy as np
 import logging
 
 from src.signal_detector import Signal
+from src.h4_hvg_detector import H4HVGDetector
 
 logger = logging.getLogger(__name__)
 
@@ -29,22 +30,31 @@ class US30SwingDetector:
     Strategies:
     1. Trend Continuation Pullback - Enters on pullbacks in strong trends
     2. Major Trend Reversal - Catches trend changes with EMA crosses
+    3. H4 HVG - 4-Hour High Volume Gap detection
     """
     
-    def __init__(self, config: dict):
+    def __init__(self, config: dict, h4_hvg_config: Optional[Dict] = None):
         """
         Initialize US30 Swing Detector.
         
         Args:
             config: Configuration dictionary with signal rules
+            h4_hvg_config: H4 HVG configuration dictionary
         """
         self.config = config
+        
+        # Initialize H4 HVG detector if config provided
+        self.h4_hvg_detector = None
+        if h4_hvg_config:
+            self.h4_hvg_detector = H4HVGDetector(config=h4_hvg_config, symbol="US30")
+            logger.info("H4HVGDetector initialized for US30 swing with US30 market settings")
         
         # Signal history for duplicate prevention
         self.recent_signals = []
         self.duplicate_window_minutes = config.get('duplicate_time_window_minutes', 240)
         
-        logger.info("US30SwingDetector initialized")
+        strategy_count = 3 if self.h4_hvg_detector else 2
+        logger.info(f"US30SwingDetector initialized with {strategy_count} strategies")
     
     def detect_signals(self, data: pd.DataFrame, timeframe: str, symbol: str = "US30") -> Optional[US30SwingSignal]:
         """
@@ -60,6 +70,21 @@ class US30SwingDetector:
         """
         if data.empty or len(data) < 200:  # Need more history for swing
             return None
+        
+        # Check for H4 HVG signal first on 4-hour timeframe
+        if timeframe == '4h' and self.h4_hvg_detector:
+            hvg_signal = self.h4_hvg_detector.generate_h4_hvg_signal(data, timeframe, symbol)
+            if hvg_signal:
+                # Check for duplicates using H4 HVG detector's own duplicate detection
+                if not self.h4_hvg_detector.is_duplicate_signal(hvg_signal):
+                    # Add to H4 HVG detector's history
+                    self.h4_hvg_detector.add_signal_to_history(hvg_signal)
+                    
+                    # Convert to US30SwingSignal
+                    us30_signal = self._convert_to_us30_signal(hvg_signal)
+                    
+                    logger.info(f"🎯 {us30_signal.signal_type} signal: H4 HVG on {timeframe}")
+                    return us30_signal
         
         # Try momentum shift first (catches RSI turning with ADX > 18)
         signal = self._detect_momentum_shift(data, timeframe, symbol)
@@ -195,113 +220,7 @@ class US30SwingDetector:
             logger.error(f"Error in momentum shift detection: {e}", exc_info=True)
             return None
     
-    def _detect_momentum_shift(self, data: pd.DataFrame, timeframe: str, symbol: str = "US30") -> Optional[US30SwingSignal]:
-        """
-        Detect Momentum Shift signals - catches RSI turning with ADX confirmation.
-        
-        Strategy:
-        - Uses RSI(7) for faster momentum detection
-        - Bullish: RSI turning up (increasing over last 2-3 candles)
-        - Bearish: RSI turning down (decreasing over last 2-3 candles)
-        - ADX >= 18 (trend forming, not flat)
-        - Volume >= 0.8x average
-        
-        Args:
-            data: DataFrame with indicators
-            timeframe: Timeframe string
-            symbol: Trading symbol
-            
-        Returns:
-            US30SwingSignal if detected, None otherwise
-        """
-        try:
-            if len(data) < 4:
-                return None
-            
-            last = data.iloc[-1]
-            prev = data.iloc[-2]
-            prev2 = data.iloc[-3]
-            
-            # Check for required indicators
-            required_indicators = ['rsi_7', 'adx', 'volume', 'volume_ma', 'atr']
-            if not all(ind in last.index for ind in required_indicators):
-                logger.debug(f"[{timeframe}] Missing required indicators for momentum shift detection")
-                return None
-            
-            # Check ADX >= 18 (trend forming)
-            if last['adx'] < 18:
-                logger.debug(f"[{timeframe}] ADX too low: {last['adx']:.1f} (need >= 18 for momentum shift)")
-                return None
-            
-            # Calculate volume ratio
-            volume_ratio = last['volume'] / last['volume_ma']
-            
-            # Check volume threshold (0.8x average)
-            if volume_ratio < self.config.get('volume_spike_threshold', 0.8):
-                logger.debug(f"[{timeframe}] Volume too low: {volume_ratio:.2f}x (need >= {self.config.get('volume_spike_threshold', 0.8)}x)")
-                return None
-            
-            # Check for RSI(7) turning up (bullish momentum shift)
-            rsi_7_current = last['rsi_7']
-            rsi_7_prev = prev['rsi_7']
-            rsi_7_prev2 = prev2['rsi_7']
-            
-            # Bullish Momentum Shift: RSI(7) turning up
-            if rsi_7_current > rsi_7_prev and rsi_7_prev > rsi_7_prev2:
-                logger.info(f"[{timeframe}] Bullish momentum shift detected - RSI(7): {rsi_7_prev2:.1f} -> {rsi_7_prev:.1f} -> {rsi_7_current:.1f} (turning up)")
-                logger.info(f"[{timeframe}] ADX: {last['adx']:.1f}, Volume: {volume_ratio:.2f}x")
-                
-                entry = last['close']
-                stop_loss = entry - (last['atr'] * self.config['stop_loss_atr_multiplier'])
-                take_profit = entry + (last['atr'] * self.config['take_profit_atr_multiplier'])
-                
-                signal = self._create_signal(
-                    timestamp=last['timestamp'],
-                    signal_type="LONG",
-                    timeframe=timeframe,
-                    entry_price=entry,
-                    stop_loss=stop_loss,
-                    take_profit=take_profit,
-                    indicators=last,
-                    strategy="Momentum Shift (Bullish RSI Turn)",
-                    symbol=symbol,
-                    trend_alignment="rsi_turning_up"
-                )
-                
-                return signal
-            
-            # Bearish Momentum Shift: RSI(7) turning down
-            elif rsi_7_current < rsi_7_prev and rsi_7_prev < rsi_7_prev2:
-                logger.info(f"[{timeframe}] Bearish momentum shift detected - RSI(7): {rsi_7_prev2:.1f} -> {rsi_7_prev:.1f} -> {rsi_7_current:.1f} (turning down)")
-                logger.info(f"[{timeframe}] ADX: {last['adx']:.1f}, Volume: {volume_ratio:.2f}x")
-                
-                entry = last['close']
-                stop_loss = entry + (last['atr'] * self.config['stop_loss_atr_multiplier'])
-                take_profit = entry - (last['atr'] * self.config['take_profit_atr_multiplier'])
-                
-                signal = self._create_signal(
-                    timestamp=last['timestamp'],
-                    signal_type="SHORT",
-                    timeframe=timeframe,
-                    entry_price=entry,
-                    stop_loss=stop_loss,
-                    take_profit=take_profit,
-                    indicators=last,
-                    strategy="Momentum Shift (Bearish RSI Turn)",
-                    symbol=symbol,
-                    trend_alignment="rsi_turning_down"
-                )
-                
-                return signal
-            
-            else:
-                logger.debug(f"[{timeframe}] No momentum shift: RSI(7) {rsi_7_prev2:.1f} -> {rsi_7_prev:.1f} -> {rsi_7_current:.1f}")
-            
-            return None
-            
-        except Exception as e:
-            logger.error(f"Error in momentum shift detection: {e}", exc_info=True)
-            return None
+
     
     def _detect_trend_alignment(self, data: pd.DataFrame, timeframe: str, symbol: str = "US30") -> Optional[US30SwingSignal]:
         """
@@ -767,6 +686,51 @@ class US30SwingDetector:
         reasons.append(f"   • Risk/Reward: {abs(indicators['atr'] * self.config['take_profit_atr_multiplier']) / abs(indicators['atr'] * self.config['stop_loss_atr_multiplier']):.2f}:1")
         
         return "\n".join(reasons)
+    
+    def _convert_to_us30_signal(self, hvg_signal) -> US30SwingSignal:
+        """
+        Convert H4 HVG Signal to US30SwingSignal with US30-specific context.
+        
+        Args:
+            hvg_signal: H4 HVG Signal object
+            
+        Returns:
+            US30SwingSignal with US30-specific enhancements
+        """
+        # Calculate EMA 200 distance if available
+        ema_200_distance = 0
+        if hvg_signal.indicators and 'ema_200' in hvg_signal.indicators:
+            ema_200 = hvg_signal.indicators['ema_200']
+            if ema_200 and ema_200 > 0:
+                ema_200_distance = ((hvg_signal.entry_price - ema_200) / ema_200) * 100
+        
+        # Create US30SwingSignal from H4 HVG signal
+        us30_signal = US30SwingSignal(
+            timestamp=hvg_signal.timestamp,
+            signal_type=hvg_signal.signal_type,
+            timeframe=hvg_signal.timeframe,
+            symbol=hvg_signal.symbol,
+            entry_price=hvg_signal.entry_price,
+            stop_loss=hvg_signal.stop_loss,
+            take_profit=hvg_signal.take_profit,
+            atr=hvg_signal.atr,
+            risk_reward=hvg_signal.risk_reward,
+            market_bias=hvg_signal.market_bias,
+            confidence=hvg_signal.confidence,
+            indicators=hvg_signal.indicators,
+            reasoning=hvg_signal.reasoning,
+            strategy=hvg_signal.strategy,
+            gap_info=hvg_signal.gap_info,
+            volume_spike_ratio=hvg_signal.volume_spike_ratio,
+            confluence_factors=hvg_signal.confluence_factors,
+            trend_direction=hvg_signal.market_bias,
+            swing_points=None,
+            pullback_depth=None,
+            macd_histogram=hvg_signal.indicators.get('macd_histogram') if hvg_signal.indicators else None,
+            ema_200_distance=ema_200_distance
+        )
+        
+        return us30_signal
     
     def _is_duplicate(self, signal: US30SwingSignal) -> bool:
         """Check if signal is duplicate of recent signal."""

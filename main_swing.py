@@ -97,6 +97,11 @@ def main():
         duplicate_price_threshold_percent=config['signal_detection']['duplicate_price_threshold_percent']
     )
     
+    # Configure H4 HVG if enabled
+    if config.get('h4_hvg', {}).get('enabled', False):
+        signal_detector.configure_h4_hvg(config['h4_hvg'], config['symbol'])
+        logger.info("H4 HVG detection enabled for BTC swing trading")
+    
     # Initialize alerter
     alerter = None
     if config['telegram']['enabled']:
@@ -233,9 +238,14 @@ def main():
                     # Log scan result to Excel
                     if excel_reporter and not candles.empty:
                         last_row = candles.iloc[-1]
+                        # Determine scanner name based on strategy
+                        scanner_name = 'BTC-Swing'
+                        if detected_signal and getattr(detected_signal, 'strategy', '') == 'H4 HVG':
+                            scanner_name = 'BTC-Swing-H4HVG'
+                        
                         scan_data = {
                             'timestamp': datetime.now(),
-                            'scanner': 'BTC-Swing',
+                            'scanner': scanner_name,
                             'symbol': config['symbol'],
                             'timeframe': timeframe,
                             'price': last_row['close'],
@@ -263,7 +273,10 @@ def main():
                                 'market_bias': getattr(detected_signal, 'market_bias', None),
                                 'trend_direction': getattr(detected_signal, 'trend_direction', None),
                                 'swing_points': getattr(detected_signal, 'swing_points', None),
-                                'pullback_depth': getattr(detected_signal, 'pullback_depth', None)
+                                'pullback_depth': getattr(detected_signal, 'pullback_depth', None),
+                                'gap_size_percent': getattr(detected_signal, 'gap_info', {}).gap_percent if detected_signal and hasattr(detected_signal, 'gap_info') and detected_signal.gap_info else None,
+                                'volume_spike_ratio': getattr(detected_signal, 'volume_spike_ratio', None) if detected_signal else None,
+                                'confluence_factors': len(getattr(detected_signal, 'confluence_factors', [])) if detected_signal and hasattr(detected_signal, 'confluence_factors') and detected_signal.confluence_factors else None
                             } if detected_signal else {}
                         }
                         excel_reporter.log_scan_result(scan_data)

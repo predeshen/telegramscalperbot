@@ -289,8 +289,21 @@ Time: {time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime())}
         signal_emoji = "🟢" if signal.signal_type == "LONG" else "🔴"
         symbol = getattr(signal, 'symbol', 'BTC/USD')  # Default to BTC/USD for backward compatibility
         
+        # Check if this is an H4 HVG signal for enhanced formatting
+        is_h4_hvg = getattr(signal, 'strategy', '') == 'H4 HVG'
+        gap_info = getattr(signal, 'gap_info', None)
+        volume_spike_ratio = getattr(signal, 'volume_spike_ratio', None)
+        confluence_factors = getattr(signal, 'confluence_factors', None)
+        
+        # Enhanced header for H4 HVG signals
+        if is_h4_hvg:
+            gap_direction = "⬆️" if signal.signal_type == "LONG" else "⬇️"
+            message_header = f"{signal_emoji} *{symbol} H4 HVG {signal.signal_type}* {gap_direction}"
+        else:
+            message_header = f"{signal_emoji} *{symbol} {signal.signal_type} SIGNAL*"
+        
         message = f"""
-{signal_emoji} *{symbol} {signal.signal_type} SIGNAL*
+{message_header}
 
 *📍 ENTRY LEVELS*
 Entry: ${signal.entry_price:,.2f}
@@ -301,7 +314,19 @@ Breakeven: ${breakeven:,.2f} (move SL here at 50%)
 *📊 TRADE INFO*
 R:R: 1:{signal.risk_reward:.2f} | TF: {signal.timeframe}
 Market: {signal.market_bias.upper()} | Confidence: {signal.confidence}/5
-ATR: ${signal.atr:,.2f}
+ATR: ${signal.atr:,.2f}"""
+
+        # Add H4 HVG specific information
+        if is_h4_hvg and gap_info:
+            message += f"""
+
+*🔥 H4 HVG DETAILS*
+Gap Size: {gap_info.gap_percent:.2f}% (${gap_info.gap_size:.2f})
+Gap Range: ${gap_info.gap_low:.2f} - ${gap_info.gap_high:.2f}
+Volume Spike: {volume_spike_ratio:.1f}x average
+Confluence: {len(confluence_factors) if confluence_factors else 0} factors"""
+
+        message += f"""
 
 *🎯 REASONING*
 {signal.reasoning}

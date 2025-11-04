@@ -74,7 +74,13 @@ def main():
     
     indicator_calc = IndicatorCalculator()
     
-    signal_detector = US30SwingDetector(config=config['signal_rules'])
+    # Configure H4 HVG if enabled
+    h4_hvg_config = None
+    if config.get('h4_hvg', {}).get('enabled', False):
+        h4_hvg_config = config['h4_hvg']
+        logger.info("H4 HVG detection enabled for US30 swing trading")
+    
+    signal_detector = US30SwingDetector(config=config['signal_rules'], h4_hvg_config=h4_hvg_config)
     
     # Initialize alerter
     alerter = None
@@ -241,9 +247,14 @@ def main():
                         
                         # Log scan result to Excel
                         if excel_reporter and not candles.empty:
+                            # Determine scanner name based on strategy
+                            scanner_name = 'US30-Swing'
+                            if signal and getattr(signal, 'strategy', '') == 'H4 HVG':
+                                scanner_name = 'US30-Swing-H4HVG'
+                            
                             scan_data = {
                                 'timestamp': datetime.now(),
-                                'scanner': 'US30-Swing',
+                                'scanner': scanner_name,
                                 'symbol': config['exchange']['symbol'],
                                 'timeframe': timeframe,
                                 'price': last_row['close'],
@@ -273,7 +284,10 @@ def main():
                                     'market_bias': getattr(signal, 'market_bias', None),
                                     'trend_direction': getattr(signal, 'trend_direction', None),
                                     'swing_points': getattr(signal, 'swing_points', None),
-                                    'pullback_depth': getattr(signal, 'pullback_depth', None)
+                                    'pullback_depth': getattr(signal, 'pullback_depth', None),
+                                    'gap_size_percent': getattr(signal, 'gap_info', {}).gap_percent if signal and hasattr(signal, 'gap_info') and signal.gap_info else None,
+                                    'volume_spike_ratio': getattr(signal, 'volume_spike_ratio', None) if signal else None,
+                                    'confluence_factors': len(getattr(signal, 'confluence_factors', [])) if signal and hasattr(signal, 'confluence_factors') and signal.confluence_factors else None
                                 } if signal else {}
                             }
                             excel_reporter.log_scan_result(scan_data)

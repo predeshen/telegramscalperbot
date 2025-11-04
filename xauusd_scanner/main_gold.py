@@ -90,10 +90,17 @@ def main():
     key_level_tracker = KeyLevelTracker()
     strategy_selector = StrategySelector(session_manager)
     
+    # Configure H4 HVG if enabled
+    h4_hvg_config = None
+    if config.get('h4_hvg', {}).get('enabled', False):
+        h4_hvg_config = config['h4_hvg']
+        logger.info("H4 HVG detection enabled for Gold scalping")
+    
     signal_detector = GoldSignalDetector(
         session_manager=session_manager,
         key_level_tracker=key_level_tracker,
-        strategy_selector=strategy_selector
+        strategy_selector=strategy_selector,
+        h4_hvg_config=h4_hvg_config
     )
     
     # Initialize alerter
@@ -292,9 +299,14 @@ def main():
                     if excel_reporter and not candles.empty:
                         last_candle = candles.iloc[-1]
                         session_info = session_manager.get_session_info()
+                        # Determine scanner name based on strategy
+                        scanner_name = f"XAUUSD-Scalp-{session_info['session']}"
+                        if signal and getattr(signal, 'strategy', '') == 'H4 HVG':
+                            scanner_name = f"XAUUSD-Scalp-H4HVG-{session_info['session']}"
+                        
                         scan_data = {
                             'timestamp': datetime.now(),
-                            'scanner': f"XAUUSD-Scalp-{session_info['session']}",
+                            'scanner': scanner_name,
                             'symbol': config['exchange']['symbol'],
                             'timeframe': timeframe,
                             'price': last_candle['close'],
@@ -315,7 +327,10 @@ def main():
                                 'stop_loss': signal.stop_loss,
                                 'take_profit': signal.take_profit,
                                 'risk_reward': signal.risk_reward,
-                                'strategy': getattr(signal, 'strategy', 'N/A')
+                                'strategy': getattr(signal, 'strategy', 'N/A'),
+                                'gap_size_percent': getattr(signal, 'gap_info', {}).gap_percent if signal and hasattr(signal, 'gap_info') and signal.gap_info else None,
+                                'volume_spike_ratio': getattr(signal, 'volume_spike_ratio', None) if signal else None,
+                                'confluence_factors': len(getattr(signal, 'confluence_factors', [])) if signal and hasattr(signal, 'confluence_factors') and signal.confluence_factors else None
                             } if signal else {}
                         }
                         excel_reporter.log_scan_result(scan_data)

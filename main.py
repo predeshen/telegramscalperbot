@@ -66,6 +66,25 @@ class BTCScalpingScanner:
             duplicate_price_threshold_percent=self.config.signal_rules.duplicate_price_threshold_percent
         )
         
+        # Configure H4 HVG if enabled
+        if self.config.h4_hvg and self.config.h4_hvg.enabled:
+            # Convert dataclass to dict for H4HVGDetector
+            h4_hvg_config = {
+                'min_gap_percent': self.config.h4_hvg.min_gap_percent,
+                'volume_spike_threshold': self.config.h4_hvg.volume_spike_threshold,
+                'atr_multiplier_sl': self.config.h4_hvg.atr_multiplier_sl,
+                'gap_target_multiplier': self.config.h4_hvg.gap_target_multiplier,
+                'min_risk_reward': self.config.h4_hvg.min_risk_reward,
+                'max_gap_age_candles': self.config.h4_hvg.max_gap_age_candles,
+                'rsi_min': self.config.h4_hvg.rsi_min,
+                'rsi_max': self.config.h4_hvg.rsi_max,
+                'require_ema_confluence': self.config.h4_hvg.require_ema_confluence,
+                'duplicate_time_window_minutes': self.config.h4_hvg.duplicate_time_window_minutes,
+                'duplicate_price_threshold_percent': self.config.h4_hvg.duplicate_price_threshold_percent
+            }
+            self.signal_detector.configure_h4_hvg(h4_hvg_config, self.config.exchange.symbol)
+            logger.info("H4 HVG detection enabled for BTC scalping")
+        
         # Initialize alerters
         email_alerter = None
         if self.config.smtp.password != "DISABLED":
@@ -229,9 +248,14 @@ class BTCScalpingScanner:
                                 # Log scan result to Excel
                                 if self.excel_reporter:
                                     last_row = data_with_indicators.iloc[-1]
+                                    # Determine scanner name based on strategy
+                                    scanner_name = 'BTC-Scalp'
+                                    if signal and getattr(signal, 'strategy', '') == 'H4 HVG':
+                                        scanner_name = 'BTC-Scalp-H4HVG'
+                                    
                                     scan_data = {
                                         'timestamp': datetime.now(),
-                                        'scanner': 'BTC-Scalp',
+                                        'scanner': scanner_name,
                                         'symbol': self.config.exchange.symbol,
                                         'timeframe': timeframe,
                                         'price': last_row['close'],
@@ -253,7 +277,10 @@ class BTCScalpingScanner:
                                             'stop_loss': signal.stop_loss,
                                             'take_profit': signal.take_profit,
                                             'risk_reward': signal.risk_reward,
-                                            'strategy': getattr(signal, 'strategy', 'N/A')
+                                            'strategy': getattr(signal, 'strategy', 'N/A'),
+                                            'gap_size_percent': getattr(signal, 'gap_info', {}).gap_percent if signal and hasattr(signal, 'gap_info') and signal.gap_info else None,
+                                            'volume_spike_ratio': getattr(signal, 'volume_spike_ratio', None) if signal else None,
+                                            'confluence_factors': len(getattr(signal, 'confluence_factors', [])) if signal and hasattr(signal, 'confluence_factors') and signal.confluence_factors else None
                                         } if signal else {}
                                     }
                                     self.excel_reporter.log_scan_result(scan_data)

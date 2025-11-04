@@ -1,6 +1,6 @@
 """
 Gold Signal Detector with Multiple Strategies
-Implements Asian Range Breakout, EMA Cloud Breakout, Mean Reversion, and Trend Following strategies
+Implements Asian Range Breakout, EMA Cloud Breakout, Mean Reversion, Trend Following, and H4 HVG strategies
 """
 from dataclasses import dataclass
 from datetime import datetime
@@ -10,6 +10,7 @@ import logging
 
 from src.signal_detector import Signal
 from src.trend_analyzer import TrendAnalyzer
+from src.h4_hvg_detector import H4HVGDetector
 from xauusd_scanner.strategy_selector import GoldStrategy, StrategySelector
 from xauusd_scanner.session_manager import SessionManager
 from xauusd_scanner.key_level_tracker import KeyLevelTracker
@@ -36,12 +37,14 @@ class GoldSignalDetector:
     2. EMA Cloud Breakout - Trend following with EMA alignment
     3. Mean Reversion - Reversals when overextended from VWAP
     4. Trend Following - Pullback entries within established trends
+    5. H4 HVG - 4-Hour High Volume Gap detection
     """
     
     def __init__(self,
                  session_manager: SessionManager,
                  key_level_tracker: KeyLevelTracker,
-                 strategy_selector: StrategySelector):
+                 strategy_selector: StrategySelector,
+                 h4_hvg_config: Optional[Dict] = None):
         """
         Initialize Gold Signal Detector.
         
@@ -49,30 +52,65 @@ class GoldSignalDetector:
             session_manager: SessionManager for session detection
             key_level_tracker: KeyLevelTracker for level analysis
             strategy_selector: StrategySelector for strategy selection
+            h4_hvg_config: H4 HVG configuration dictionary
         """
         self.session_manager = session_manager
         self.key_level_tracker = key_level_tracker
         self.strategy_selector = strategy_selector
         
+        # Initialize H4 HVG detector if config provided
+        self.h4_hvg_detector = None
+        if h4_hvg_config:
+            self.h4_hvg_detector = H4HVGDetector(config=h4_hvg_config, symbol="XAU/USD")
+            logger.info("H4HVGDetector initialized for Gold with XAU market settings")
+        
         # Signal history for duplicate prevention
         self.recent_signals = []
         self.duplicate_window_minutes = 15
         
-        logger.info("GoldSignalDetector initialized with 4 strategies")
+        strategy_count = 5 if self.h4_hvg_detector else 4
+        logger.info(f"GoldSignalDetector initialized with {strategy_count} strategies")
     
-    def detect_signals(self, data: pd.DataFrame, timeframe: str) -> Optional[GoldSignal]:
+    def detect_signals(self, data: pd.DataFrame, timeframe: str, symbol: str = "XAU/USD") -> Optional[GoldSignal]:
         """
         Detect trading signals using appropriate strategy.
         
         Args:
             data: DataFrame with OHLCV and indicators
             timeframe: Timeframe string
+            symbol: Trading symbol (for H4 HVG detection)
             
         Returns:
             GoldSignal if detected, None otherwise
         """
         if data.empty or len(data) < 50:
             return None
+        
+        # Check for H4 HVG signal first on 4-hour timeframe
+        if timeframe == '4h' and self.h4_hvg_detector:
+            hvg_signal = self.h4_hvg_detector.generate_h4_hvg_signal(data, timeframe, symbol)
+            if hvg_signal:
+                # Check for duplicates using H4 HVG detector's own duplicate detection
+                if not self.h4_hvg_detector.is_duplicate_signal(hvg_signal):
+                    # Add to H4 HVG detector's history
+                    self.h4_hvg_detector.add_signal_to_history(hvg_signal)
+                    
+                    # Convert to GoldSignal and add session context
+                    gold_signal = self._convert_to_gold_signal(hvg_signal)
+                    current_session = self.session_manager.get_current_session()
+                    gold_signal.session = current_session.value
+                    
+                    # Add Asian range info if available
+                    asian_range = self.session_manager.get_asian_range()
+                    if asian_range:
+                        gold_signal.asian_range_info = asian_range
+                    
+                    # Add key level info
+                    last_price = data.iloc[-1]['close']
+                    gold_signal.key_level_info = self.key_level_tracker.get_level_status(last_price)
+                    
+                    logger.info(f"🎯 {gold_signal.signal_type} signal: H4 HVG on {timeframe}")
+                    return gold_signal
         
         # Try momentum shift first (universal strategy that works in all sessions)
         signal = self._detect_momentum_shift(data, timeframe)
@@ -867,6 +905,43 @@ class GoldSignalDetector:
         reasons.append(f"   • Volume confirms institutional participation")
         
         return "\n".join(reasons)
+    
+    def _convert_to_gold_signal(self, hvg_signal) -> GoldSignal:
+        """
+        Convert H4 HVG Signal to GoldSignal with Gold-specific context.
+        
+        Args:
+            hvg_signal: H4 HVG Signal object
+            
+        Returns:
+            GoldSignal with Gold-specific enhancements
+        """
+        # Create GoldSignal from H4 HVG signal
+        gold_signal = GoldSignal(
+            timestamp=hvg_signal.timestamp,
+            signal_type=hvg_signal.signal_type,
+            timeframe=hvg_signal.timeframe,
+            symbol=hvg_signal.symbol,
+            entry_price=hvg_signal.entry_price,
+            stop_loss=hvg_signal.stop_loss,
+            take_profit=hvg_signal.take_profit,
+            atr=hvg_signal.atr,
+            risk_reward=hvg_signal.risk_reward,
+            market_bias=hvg_signal.market_bias,
+            confidence=hvg_signal.confidence,
+            indicators=hvg_signal.indicators,
+            reasoning=hvg_signal.reasoning,
+            strategy=hvg_signal.strategy,
+            gap_info=hvg_signal.gap_info,
+            volume_spike_ratio=hvg_signal.volume_spike_ratio,
+            confluence_factors=hvg_signal.confluence_factors,
+            session="",  # Will be set by caller
+            asian_range_info=None,  # Will be set by caller
+            key_level_info=None,  # Will be set by caller
+            spread_pips=None  # Will be set by caller
+        )
+        
+        return gold_signal
     
     def _is_duplicate(self, signal: GoldSignal) -> bool:
         """Check if signal is duplicate of recent signal."""

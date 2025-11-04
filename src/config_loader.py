@@ -67,6 +67,23 @@ class LoggingConfig:
 
 
 @dataclass
+class H4HVGConfig:
+    """H4 HVG strategy configuration."""
+    enabled: bool
+    min_gap_percent: float
+    volume_spike_threshold: float
+    atr_multiplier_sl: float
+    gap_target_multiplier: float
+    min_risk_reward: float
+    max_gap_age_candles: int
+    rsi_min: int
+    rsi_max: int
+    require_ema_confluence: bool
+    duplicate_time_window_minutes: int
+    duplicate_price_threshold_percent: float
+
+
+@dataclass
 class Config:
     """Main application configuration."""
     exchange: ExchangeConfig
@@ -75,6 +92,7 @@ class Config:
     smtp: SMTPConfig
     telegram: TelegramConfig
     logging: LoggingConfig
+    h4_hvg: Optional[H4HVGConfig] = None
 
 
 class ConfigLoader:
@@ -122,13 +140,19 @@ class ConfigLoader:
             
             logging = LoggingConfig(**config_data['logging'])
             
+            # H4 HVG is optional
+            h4_hvg = None
+            if 'h4_hvg' in config_data:
+                h4_hvg = H4HVGConfig(**config_data['h4_hvg'])
+            
             config = Config(
                 exchange=exchange,
                 indicators=indicators,
                 signal_rules=signal_rules,
                 smtp=smtp,
                 telegram=telegram,
-                logging=logging
+                logging=logging,
+                h4_hvg=h4_hvg
             )
             
             # Validate configuration
