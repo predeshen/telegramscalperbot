@@ -1,9 +1,9 @@
 {
-  "exchange": "kraken",
-  "symbol": "BTC/USD",
+  "exchange": "yfinance",
+  "symbol": "BTC-USD",
   "timeframes": ["15m", "1h", "4h", "1d"],
   "signal_detection": {
-    "volume_spike_threshold": 1.5,
+    "volume_spike_threshold": 0.7,
     "rsi_min": 30,
     "rsi_max": 70,
     "stop_loss_atr_multiplier": 2.0,
@@ -13,8 +13,8 @@
   },
   "telegram": {
     "enabled": true,
-    "bot_token_env": "8276571945:AAFKYdUCEd7Ct405K8BcBWWHyxZe5wGwo7M",
-    "chat_id_env": "8119046376"
+    "bot_token": "8276571945:AAFKYdUCEd7Ct405K8BcBWWHyxZe5wGwo7M",
+    "chat_id": "8119046376"
   },
   "email": {
     "enabled": false

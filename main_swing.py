@@ -11,7 +11,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from src.market_data_client import MarketDataClient
+from src.yfinance_client import YFinanceClient
 from src.indicator_calculator import IndicatorCalculator
 from src.signal_detector import SignalDetector
 from src.alerter import TelegramAlerter
@@ -73,12 +73,13 @@ def main():
     logger = logging.getLogger(__name__)
     logger.info("=" * 60)
     logger.info("BTC Swing Trading Scanner Starting")
+    logger.info(f"Data Source: Yahoo Finance ({config['symbol']})")
     logger.info(f"Timeframes: {', '.join(config['timeframes'])}")
     logger.info("=" * 60)
     
     # Initialize components
-    market_client = MarketDataClient(
-        exchange_name=config['exchange'],
+    # Use YFinance for better data quality (especially volume)
+    market_client = YFinanceClient(
         symbol=config['symbol'],
         timeframes=config['timeframes'],
         buffer_size=500
@@ -99,13 +100,15 @@ def main():
     # Initialize alerter
     alerter = None
     if config['telegram']['enabled']:
-        bot_token = os.getenv(config['telegram']['bot_token_env'])
-        chat_id = os.getenv(config['telegram']['chat_id_env'])
+        # Try direct values first, then environment variables
+        bot_token = config['telegram'].get('bot_token') or os.getenv(config['telegram'].get('bot_token_env', ''))
+        chat_id = config['telegram'].get('chat_id') or os.getenv(config['telegram'].get('chat_id_env', ''))
         
         if bot_token and chat_id:
             alerter = TelegramAlerter(bot_token, chat_id)
+            logger.info("Telegram alerter initialized")
         else:
-            logger.warning("Telegram credentials not found in environment variables")
+            logger.warning("Telegram credentials not found in config or environment variables")
     
     # Initialize trade tracker
     trade_tracker = TradeTracker(alerter=alerter)
@@ -132,10 +135,10 @@ def main():
     
     logger.info("All components initialized successfully")
     
-    # Connect to exchange
-    logger.info("Connecting to exchange...")
+    # Connect to data source
+    logger.info("Connecting to Yahoo Finance...")
     market_client.connect()
-    logger.info(f"Successfully connected to {config['exchange']}")
+    logger.info(f"Successfully connected to Yahoo Finance for {config['symbol']}")
     
     # Fetch initial data for all timeframes
     candle_data = {}
