@@ -20,6 +20,8 @@
     "volume_reversal_threshold": 1.2,
     "rsi_min": 30,
     "rsi_max": 70,
+    "adx_min_momentum_shift": 18,
+    "adx_min_trend_alignment": 19,
     "stop_loss_atr_multiplier": 2.0,
     "take_profit_atr_multiplier": 3.0,
     "duplicate_time_window_minutes": 120,

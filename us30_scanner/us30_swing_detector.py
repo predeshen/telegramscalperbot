@@ -61,8 +61,12 @@ class US30SwingDetector:
         if data.empty or len(data) < 200:  # Need more history for swing
             return None
         
-        # Try trend alignment first (new primary strategy)
-        signal = self._detect_trend_alignment(data, timeframe, symbol)
+        # Try momentum shift first (catches RSI turning with ADX > 18)
+        signal = self._detect_momentum_shift(data, timeframe, symbol)
+        
+        if not signal:
+            # Try trend alignment (primary strategy)
+            signal = self._detect_trend_alignment(data, timeframe, symbol)
         
         if not signal:
             # Try trend continuation (secondary)
@@ -79,6 +83,117 @@ class US30SwingDetector:
             return signal
         
         return None
+    
+    def _detect_momentum_shift(self, data: pd.DataFrame, timeframe: str, symbol: str = "US30") -> Optional[US30SwingSignal]:
+        """
+        Detect Momentum Shift signals - catches RSI turning with building momentum.
+        
+        Strategy (matches manual trading approach):
+        - Bullish: RSI turning up (increasing over last 2-3 candles)
+        - Bearish: RSI turning down (decreasing over last 2-3 candles)
+        - ADX > 18 (trend forming, not flat)
+        - Volume >= 0.8x average
+        - Works with both RSI(7) and RSI(14)
+        
+        Args:
+            data: DataFrame with indicators
+            timeframe: Timeframe string
+            symbol: Trading symbol
+            
+        Returns:
+            US30SwingSignal if detected, None otherwise
+        """
+        try:
+            if len(data) < 4:
+                return None
+            
+            last = data.iloc[-1]
+            prev = data.iloc[-2]
+            prev2 = data.iloc[-3]
+            prev3 = data.iloc[-4]
+            
+            # Check for required indicators
+            required_indicators = ['rsi', 'volume', 'volume_ma', 'atr', 'adx']
+            if not all(ind in last.index for ind in required_indicators):
+                logger.debug(f"[{timeframe}] Missing required indicators for momentum shift detection")
+                return None
+            
+            # Check ADX > 18 (trend forming)
+            if last['adx'] < 18:
+                logger.debug(f"[{timeframe}] ADX too low: {last['adx']:.1f} (need >= 18 for momentum shift)")
+                return None
+            
+            # Calculate volume ratio
+            volume_ratio = last['volume'] / last['volume_ma']
+            
+            # Check volume threshold (0.8x average)
+            if volume_ratio < self.config.get('volume_spike_threshold', 0.8):
+                logger.debug(f"[{timeframe}] Volume too low: {volume_ratio:.2f}x (need >= {self.config.get('volume_spike_threshold', 0.8)}x)")
+                return None
+            
+            # Check for RSI turning UP (Bullish Momentum Shift)
+            rsi_increasing = (last['rsi'] > prev['rsi'] and 
+                            prev['rsi'] > prev2['rsi'])
+            
+            # Check for RSI turning DOWN (Bearish Momentum Shift)
+            rsi_decreasing = (last['rsi'] < prev['rsi'] and 
+                            prev['rsi'] < prev2['rsi'])
+            
+            # Bullish Momentum Shift
+            if rsi_increasing:
+                # RSI should be coming from oversold or neutral (not already overbought)
+                if last['rsi'] < 70:
+                    logger.info(f"[{timeframe}] Bullish momentum shift detected - RSI turning up: {prev2['rsi']:.1f} -> {prev['rsi']:.1f} -> {last['rsi']:.1f}, ADX: {last['adx']:.1f}, Volume: {volume_ratio:.2f}x")
+                    
+                    entry = last['close']
+                    stop_loss = entry - (last['atr'] * self.config['stop_loss_atr_multiplier'])
+                    take_profit = entry + (last['atr'] * self.config['take_profit_atr_multiplier'])
+                    
+                    signal = self._create_signal(
+                        timestamp=last['timestamp'],
+                        signal_type="LONG",
+                        timeframe=timeframe,
+                        entry_price=entry,
+                        stop_loss=stop_loss,
+                        take_profit=take_profit,
+                        indicators=last,
+                        strategy="Momentum Shift (Bullish)",
+                        symbol=symbol,
+                        trend_alignment="rsi_turning_up"
+                    )
+                    
+                    return signal
+            
+            # Bearish Momentum Shift
+            elif rsi_decreasing:
+                # RSI should be coming from overbought or neutral (not already oversold)
+                if last['rsi'] > 30:
+                    logger.info(f"[{timeframe}] Bearish momentum shift detected - RSI turning down: {prev2['rsi']:.1f} -> {prev['rsi']:.1f} -> {last['rsi']:.1f}, ADX: {last['adx']:.1f}, Volume: {volume_ratio:.2f}x")
+                    
+                    entry = last['close']
+                    stop_loss = entry + (last['atr'] * self.config['stop_loss_atr_multiplier'])
+                    take_profit = entry - (last['atr'] * self.config['take_profit_atr_multiplier'])
+                    
+                    signal = self._create_signal(
+                        timestamp=last['timestamp'],
+                        signal_type="SHORT",
+                        timeframe=timeframe,
+                        entry_price=entry,
+                        stop_loss=stop_loss,
+                        take_profit=take_profit,
+                        indicators=last,
+                        strategy="Momentum Shift (Bearish)",
+                        symbol=symbol,
+                        trend_alignment="rsi_turning_down"
+                    )
+                    
+                    return signal
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error in momentum shift detection: {e}", exc_info=True)
+            return None
     
     def _detect_trend_alignment(self, data: pd.DataFrame, timeframe: str, symbol: str = "US30") -> Optional[US30SwingSignal]:
         """
@@ -475,8 +590,24 @@ class US30SwingDetector:
         reasons.append(f"🎯 STRATEGY: {strategy}")
         reasons.append(f"📊 US30 SWING TRADING SETUP")
         
+        # Momentum Shift specific reasoning
+        if "Momentum Shift" in strategy:
+            if signal_type == "LONG":
+                reasons.append(f"📈 BULLISH MOMENTUM SHIFT:")
+                reasons.append(f"   • RSI TURNING UP - Building bullish momentum")
+                reasons.append(f"   • RSI: {indicators['rsi']:.1f} (increasing)")
+                reasons.append(f"   • ADX: {indicators.get('adx', 0):.1f} (trend forming)")
+                reasons.append(f"   • Price: ${indicators['close']:.2f}")
+                reasons.append(f"   • Early entry on momentum reversal")
+            else:
+                reasons.append(f"📉 BEARISH MOMENTUM SHIFT:")
+                reasons.append(f"   • RSI TURNING DOWN - Building bearish momentum")
+                reasons.append(f"   • RSI: {indicators['rsi']:.1f} (decreasing)")
+                reasons.append(f"   • ADX: {indicators.get('adx', 0):.1f} (trend forming)")
+                reasons.append(f"   • Price: ${indicators['close']:.2f}")
+                reasons.append(f"   • Early entry on momentum reversal")
         # Trend Alignment specific reasoning
-        if "Trend Alignment" in strategy:
+        elif "Trend Alignment" in strategy:
             if signal_type == "LONG":
                 reasons.append(f"📈 BULLISH CASCADE ALIGNMENT:")
                 reasons.append(f"   • Price: ${indicators['close']:.2f}")

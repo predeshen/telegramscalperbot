@@ -134,6 +134,7 @@ def main():
         candles['ema_200'] = indicator_calc.calculate_ema(candles, config['indicators']['ema_trend'])
         candles['atr'] = indicator_calc.calculate_atr(candles, config['indicators']['atr_period'])
         candles['rsi'] = indicator_calc.calculate_rsi(candles, config['indicators']['rsi_period'])
+        candles['rsi_7'] = indicator_calc.calculate_rsi(candles, 7)  # Add RSI(7) for faster momentum detection
         candles['volume_ma'] = indicator_calc.calculate_volume_ma(candles, config['indicators']['volume_ma_period'])
         
         # Calculate VWAP
@@ -204,6 +205,7 @@ def main():
                         candles['ema_200'] = indicator_calc.calculate_ema(candles, config['indicators']['ema_trend'])
                         candles['atr'] = indicator_calc.calculate_atr(candles, config['indicators']['atr_period'])
                         candles['rsi'] = indicator_calc.calculate_rsi(candles, config['indicators']['rsi_period'])
+                        candles['rsi_7'] = indicator_calc.calculate_rsi(candles, 7)  # Add RSI(7) for faster momentum detection
                         candles['volume_ma'] = indicator_calc.calculate_volume_ma(candles, config['indicators']['volume_ma_period'])
                         
                         # Calculate VWAP
