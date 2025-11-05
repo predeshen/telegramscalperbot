@@ -68,6 +68,12 @@ def main():
     logger.info("XAU/USD Gold Scalping Scanner Starting")
     logger.info("=" * 60)
     
+    # Log data source information
+    data_source = config['exchange'].get('data_source', 'Yahoo Finance (GC=F - Gold Futures)')
+    logger.info(f"Data Source: {data_source}")
+    logger.info(f"Symbol: {config['exchange']['symbol']}")
+    logger.info(f"Note: Prices from Yahoo Finance may differ from broker spot prices by 0.1-0.5%")
+    
     # Initialize core components
     logger.info("Initializing components...")
     
@@ -170,11 +176,17 @@ def main():
     # Send startup notification
     if alerter:
         session_info = session_manager.get_session_info()
+        data_source = config['exchange'].get('data_source', 'Yahoo Finance (GC=F)')
+        data_note = config['exchange'].get('data_source_note', 'Prices may vary from your broker')
+        
         alerter.send_message(
             f"🟢 <b>XAU/USD Gold Scanner Started</b>\n\n"
+            f"💰 Data Source: {data_source}\n"
+            f"📊 Symbol: {config['exchange']['symbol']}\n"
             f"Session: {session_info['session']}\n"
             f"Strategy: {session_info['strategy_focus']}\n"
             f"Monitoring: {', '.join(config['exchange']['timeframes'])}\n\n"
+            f"⚠️ Note: {data_note}\n\n"
             f"Ready to scan for Gold signals!"
         )
     

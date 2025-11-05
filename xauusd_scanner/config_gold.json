@@ -2,6 +2,8 @@
   "exchange": {
     "name": "oanda",
     "symbol": "XAU/USD",
+    "data_source": "Yahoo Finance (GC=F - Gold Futures)",
+    "data_source_note": "Prices may differ slightly from spot XAU/USD on your broker. Typical variance: 0.1-0.5%. Always verify prices on your broker platform before entering trades.",
     "timeframes": ["1m", "5m", "4h"]
   },
   "indicators": {

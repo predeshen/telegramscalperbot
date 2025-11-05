@@ -78,7 +78,7 @@ class GoldSignalDetector:
         Args:
             data: DataFrame with OHLCV and indicators
             timeframe: Timeframe string
-            symbol: Trading symbol (for H4 HVG detection)
+            symbol: Trading symbol (default: "XAU/USD", used for H4 HVG detection and alerts)
             
         Returns:
             GoldSignal if detected, None otherwise
@@ -113,7 +113,7 @@ class GoldSignalDetector:
                     return gold_signal
         
         # Try momentum shift first (universal strategy that works in all sessions)
-        signal = self._detect_momentum_shift(data, timeframe)
+        signal = self._detect_momentum_shift(data, timeframe, symbol)
         
         if signal:
             # Add session context
@@ -140,16 +140,16 @@ class GoldSignalDetector:
         signal = None
         
         if strategy == GoldStrategy.ASIAN_RANGE_BREAKOUT:
-            signal = self._detect_asian_range_breakout(data, timeframe)
+            signal = self._detect_asian_range_breakout(data, timeframe, symbol)
         
         elif strategy == GoldStrategy.EMA_CLOUD_BREAKOUT:
-            signal = self._detect_ema_cloud_breakout(data, timeframe)
+            signal = self._detect_ema_cloud_breakout(data, timeframe, symbol)
         
         elif strategy == GoldStrategy.MEAN_REVERSION:
-            signal = self._detect_mean_reversion(data, timeframe)
+            signal = self._detect_mean_reversion(data, timeframe, symbol)
         
         elif strategy == GoldStrategy.TREND_FOLLOWING:
-            signal = self._detect_trend_following(data, timeframe)
+            signal = self._detect_trend_following(data, timeframe, symbol)
         
         # Add session and strategy context if signal found
         if signal:
@@ -173,7 +173,7 @@ class GoldSignalDetector:
         
         return None
     
-    def _detect_momentum_shift(self, data: pd.DataFrame, timeframe: str) -> Optional[GoldSignal]:
+    def _detect_momentum_shift(self, data: pd.DataFrame, timeframe: str, symbol: str = "XAU/USD") -> Optional[GoldSignal]:
         """
         Detect Momentum Shift signals - catches RSI turning with ADX confirmation.
         
@@ -187,6 +187,7 @@ class GoldSignalDetector:
         Args:
             data: DataFrame with indicators
             timeframe: Timeframe string
+            symbol: Trading symbol (default: "XAU/USD")
             
         Returns:
             GoldSignal if detected, None otherwise
@@ -241,7 +242,8 @@ class GoldSignalDetector:
                     take_profit=take_profit,
                     atr=last['atr'],
                     indicators=last,
-                    strategy="Momentum Shift (Bullish RSI Turn)"
+                    strategy="Momentum Shift (Bullish RSI Turn)",
+                    symbol=symbol
                 )
                 
                 return signal
@@ -264,7 +266,8 @@ class GoldSignalDetector:
                     take_profit=take_profit,
                     atr=last['atr'],
                     indicators=last,
-                    strategy="Momentum Shift (Bearish RSI Turn)"
+                    strategy="Momentum Shift (Bearish RSI Turn)",
+                    symbol=symbol
                 )
                 
                 return signal
@@ -278,7 +281,7 @@ class GoldSignalDetector:
             logger.error(f"Error in momentum shift detection: {e}", exc_info=True)
             return None
     
-    def _detect_asian_range_breakout(self, data: pd.DataFrame, timeframe: str) -> Optional[GoldSignal]:
+    def _detect_asian_range_breakout(self, data: pd.DataFrame, timeframe: str, symbol: str = "XAU/USD") -> Optional[GoldSignal]:
         """
         Detect Asian Range Breakout signals.
         
@@ -340,7 +343,8 @@ class GoldSignalDetector:
                             take_profit=take_profit,
                             atr=atr,
                             indicators=last,
-                            strategy="Asian Range Breakout"
+                            strategy="Asian Range Breakout",
+                            symbol=symbol
                         )
                         
                         return signal
@@ -365,7 +369,8 @@ class GoldSignalDetector:
                             take_profit=take_profit,
                             atr=atr,
                             indicators=last,
-                            strategy="Asian Range Breakout"
+                            strategy="Asian Range Breakout",
+                            symbol=symbol
                         )
                         
                         return signal
@@ -377,7 +382,7 @@ class GoldSignalDetector:
             return None
 
     
-    def _detect_ema_cloud_breakout(self, data: pd.DataFrame, timeframe: str) -> Optional[GoldSignal]:
+    def _detect_ema_cloud_breakout(self, data: pd.DataFrame, timeframe: str, symbol: str = "XAU/USD") -> Optional[GoldSignal]:
         """
         Detect EMA Cloud Breakout signals.
         
@@ -441,7 +446,8 @@ class GoldSignalDetector:
                         take_profit=take_profit,
                         atr=atr,
                         indicators=last,
-                        strategy="EMA Cloud Breakout"
+                        strategy="EMA Cloud Breakout",
+                        symbol=symbol
                     )
                     
                     return signal
@@ -465,7 +471,8 @@ class GoldSignalDetector:
                         take_profit=take_profit,
                         atr=atr,
                         indicators=last,
-                        strategy="EMA Cloud Breakout"
+                        strategy="EMA Cloud Breakout",
+                        symbol=symbol
                     )
                     
                     return signal
@@ -476,7 +483,7 @@ class GoldSignalDetector:
             logger.error(f"Error in EMA Cloud Breakout detection: {e}")
             return None
     
-    def _detect_mean_reversion(self, data: pd.DataFrame, timeframe: str) -> Optional[GoldSignal]:
+    def _detect_mean_reversion(self, data: pd.DataFrame, timeframe: str, symbol: str = "XAU/USD") -> Optional[GoldSignal]:
         """
         Detect Mean Reversion signals.
         
@@ -542,7 +549,8 @@ class GoldSignalDetector:
                     take_profit=take_profit,
                     atr=atr,
                     indicators=last,
-                    strategy="Mean Reversion"
+                    strategy="Mean Reversion",
+                    symbol=symbol
                 )
                 
                 return signal
@@ -562,7 +570,8 @@ class GoldSignalDetector:
                     take_profit=take_profit,
                     atr=atr,
                     indicators=last,
-                    strategy="Mean Reversion"
+                    strategy="Mean Reversion",
+                    symbol=symbol
                 )
                 
                 return signal
@@ -573,7 +582,7 @@ class GoldSignalDetector:
             logger.error(f"Error in Mean Reversion detection: {e}")
             return None
     
-    def _detect_trend_following(self, data: pd.DataFrame, timeframe: str) -> Optional[GoldSignal]:
+    def _detect_trend_following(self, data: pd.DataFrame, timeframe: str, symbol: str = "XAU/USD") -> Optional[GoldSignal]:
         """
         Detect trend-following signals for Gold.
         
@@ -687,7 +696,8 @@ class GoldSignalDetector:
                     take_profit=take_profit,
                     atr=atr,
                     indicators=last,
-                    strategy="Trend Following"
+                    strategy="Trend Following",
+                    symbol=symbol
                 )
                 
                 # Add trend-specific metadata
@@ -741,7 +751,8 @@ class GoldSignalDetector:
                     take_profit=take_profit,
                     atr=atr,
                     indicators=last,
-                    strategy="Trend Following"
+                    strategy="Trend Following",
+                    symbol=symbol
                 )
                 
                 # Add trend-specific metadata
@@ -809,7 +820,7 @@ class GoldSignalDetector:
     
     def _create_gold_signal(self, timestamp: datetime, signal_type: str, timeframe: str,
                            entry_price: float, stop_loss: float, take_profit: float,
-                           atr: float, indicators: pd.Series, strategy: str) -> GoldSignal:
+                           atr: float, indicators: pd.Series, strategy: str, symbol: str = "XAU/USD") -> GoldSignal:
         """Create a GoldSignal with full context."""
         risk_reward = abs(take_profit - entry_price) / abs(entry_price - stop_loss)
         
@@ -830,6 +841,7 @@ class GoldSignalDetector:
             timestamp=timestamp,
             signal_type=signal_type,
             timeframe=timeframe,
+            symbol=symbol,
             entry_price=entry_price,
             stop_loss=stop_loss,
             take_profit=take_profit,
