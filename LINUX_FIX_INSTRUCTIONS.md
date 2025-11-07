@@ -29,6 +29,11 @@ sudo systemctl start btc-scalp-scanner btc-swing-scanner gold-scalp-scanner gold
 
 # Check status
 sudo systemctl status btc-scalp-scanner
+sudo systemctl status btc-swing-scanner
+sudo systemctl status gold-scalp-scanner
+sudo systemctl status gold-swing-scanner
+sudo systemctl status us30-swing-scanner
+sudo systemctl status us30-scalp-scanner
 ```
 
 ---

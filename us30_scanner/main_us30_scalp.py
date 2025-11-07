@@ -155,6 +155,8 @@ def main():
         candles['vwap'] = indicator_calc.calculate_vwap(candles)
         candles['atr'] = indicator_calc.calculate_atr(candles, config['indicators']['atr_period'])
         candles['rsi'] = indicator_calc.calculate_rsi(candles, config['indicators']['rsi_period'])
+        candles['rsi_7'] = indicator_calc.calculate_rsi(candles, 7)  # Add RSI(7) for faster momentum detection
+        candles['adx'] = indicator_calc.calculate_adx(candles, period=12)  # Add ADX(12) for faster trend detection
         candles['volume_ma'] = indicator_calc.calculate_volume_ma(candles, config['indicators']['volume_ma_period'])
         
         # Calculate Stochastic

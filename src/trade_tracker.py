@@ -20,7 +20,10 @@ class TradeStatus:
     target_notified: bool = False
     stop_warning_sent: bool = False
     tp_extension_notified: bool = False
+    momentum_reversal_notified: bool = False
     extended_tp: Optional[float] = None
+    highest_price: float = 0.0  # Track highest price for LONG trades
+    lowest_price: float = float('inf')  # Track lowest price for SHORT trades
     status: str = "ACTIVE"  # ACTIVE, CLOSED_TP, CLOSED_SL, EXTENDED
 
 
@@ -59,7 +62,9 @@ class TradeTracker:
         
         trade_status = TradeStatus(
             signal=signal,
-            entry_time=datetime.now()
+            entry_time=datetime.now(),
+            highest_price=signal.entry_price,  # Initialize with entry price
+            lowest_price=signal.entry_price    # Initialize with entry price
         )
         
         self.active_trades[trade_id] = trade_status
@@ -75,6 +80,12 @@ class TradeTracker:
         """
         for trade_id, trade in list(self.active_trades.items()):
             signal = trade.signal
+            
+            # Update price tracking for momentum reversal detection
+            if signal.signal_type == "LONG":
+                trade.highest_price = max(trade.highest_price, current_price)
+            else:  # SHORT
+                trade.lowest_price = min(trade.lowest_price, current_price)
             
             # Use extended TP if available
             target_price = trade.extended_tp if trade.extended_tp else signal.take_profit
@@ -93,6 +104,12 @@ class TradeTracker:
                 if self._should_extend_tp(signal, current_price, trade, indicators):
                     self._send_tp_extension_alert(signal, current_price, trade, indicators)
                     trade.tp_extension_notified = True
+            
+            # Check for momentum reversal (EXIT signal)
+            if indicators and not trade.momentum_reversal_notified:
+                if self._check_momentum_reversal(signal, current_price, trade, indicators):
+                    self._send_momentum_reversal_alert(signal, current_price, indicators)
+                    trade.momentum_reversal_notified = True
             
             # Check for management updates
             if not trade.breakeven_notified:
@@ -141,6 +158,96 @@ class TradeTracker:
         total_risk = abs(signal.entry_price - signal.stop_loss)
         
         return distance_to_stop < (total_risk * 0.2)
+    
+    def _check_momentum_reversal(self, signal: Signal, current_price: float, trade: TradeStatus, indicators: Dict) -> bool:
+        """
+        Check if momentum is reversing - signal to EXIT the trade.
+        
+        Criteria for EXIT alert:
+        1. Trade is in profit (past breakeven)
+        2. RSI showing reversal (overbought for LONG, oversold for SHORT)
+        3. RSI divergence (price higher but RSI lower for LONG, vice versa for SHORT)
+        4. Volume declining significantly (< 0.8x average)
+        
+        Args:
+            signal: Original signal
+            current_price: Current price
+            trade: Trade status
+            indicators: Dict with 'rsi', 'prev_rsi', 'volume_ratio'
+            
+        Returns:
+            True if momentum reversal detected
+        """
+        # Only check if trade is in profit
+        if signal.signal_type == "LONG":
+            if current_price <= signal.entry_price:
+                return False
+        else:
+            if current_price >= signal.entry_price:
+                return False
+        
+        rsi = indicators.get('rsi', 50)
+        prev_rsi = indicators.get('prev_rsi', 50)
+        volume_ratio = indicators.get('volume_ratio', 1.0)
+        
+        reversal_detected = False
+        
+        if signal.signal_type == "LONG":
+            # Check for bearish reversal signals
+            if rsi > 70:  # Overbought
+                reversal_detected = True
+            elif rsi < prev_rsi and current_price > trade.highest_price * 0.99:  # RSI falling while price flat/up
+                reversal_detected = True
+        else:  # SHORT
+            # Check for bullish reversal signals
+            if rsi < 30:  # Oversold
+                reversal_detected = True
+            elif rsi > prev_rsi and current_price < trade.lowest_price * 1.01:  # RSI rising while price flat/down
+                reversal_detected = True
+        
+        # Volume declining is a warning sign
+        if volume_ratio < 0.8:
+            reversal_detected = True
+        
+        return reversal_detected
+    
+    def _send_momentum_reversal_alert(self, signal: Signal, current_price: float, indicators: Dict) -> None:
+        """Send EXIT NOW alert when momentum reverses."""
+        rsi = indicators.get('rsi', 0)
+        volume_ratio = indicators.get('volume_ratio', 0)
+        
+        # Calculate current profit
+        if signal.signal_type == "LONG":
+            profit_pct = ((current_price - signal.entry_price) / signal.entry_price) * 100
+        else:
+            profit_pct = ((signal.entry_price - current_price) / signal.entry_price) * 100
+        
+        message = f"""
+🚨 *EXIT SIGNAL - MOMENTUM REVERSAL DETECTED!*
+
+{signal.signal_type} from ${signal.entry_price:,.2f}
+Current Price: ${current_price:,.2f}
+Current Profit: {profit_pct:+.2f}%
+
+*⚠️ REVERSAL SIGNALS:*
+{'🔴 RSI Overbought: ' + f'{rsi:.1f}' if signal.signal_type == 'LONG' and rsi > 70 else ''}
+{'🔴 RSI Oversold: ' + f'{rsi:.1f}' if signal.signal_type == 'SHORT' and rsi < 30 else ''}
+🔴 Volume Declining: {volume_ratio:.2f}x (momentum fading)
+🔴 Price action showing exhaustion
+
+*📉 RECOMMENDED ACTION:*
+🚪 EXIT NOW at market price
+💰 Lock in your {profit_pct:+.2f}% profit
+⚠️ Momentum is reversing - don't give back gains!
+
+*Why exit now?*
+The indicators that got you into this trade are now showing reversal. The smart move is to take profit and wait for the next high-probability setup.
+
+⏰ {datetime.now().strftime('%H:%M:%S UTC')}
+"""
+        
+        self.alerter.send_message(message)
+        logger.info(f"Sent momentum reversal EXIT alert for {signal.signal_type} trade at ${current_price:,.2f} ({profit_pct:+.2f}%)")
     
     def _should_extend_tp(self, signal: Signal, current_price: float, trade: TradeStatus, indicators: Dict) -> bool:
         """

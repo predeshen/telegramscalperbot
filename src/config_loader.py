@@ -35,6 +35,22 @@ class SignalRulesConfig:
     take_profit_atr_multiplier: float
     duplicate_time_window_minutes: int
     duplicate_price_threshold_percent: float
+    adx_min_trend: Optional[float] = None
+    enable_extreme_rsi_signals: Optional[bool] = None
+    adx_min_momentum_shift: Optional[float] = None
+    adx_min_trend_alignment: Optional[float] = None
+    rsi_momentum_threshold: Optional[float] = None
+    require_price_confirmation: Optional[bool] = None
+    volume_reversal_threshold: Optional[float] = None
+    mean_reversion_atr_threshold: Optional[float] = None
+    max_spread_pips: Optional[float] = None
+    acceptable_spread_pips: Optional[float] = None
+    key_level_threshold_pips: Optional[float] = None
+    stoch_oversold: Optional[int] = None
+    stoch_overbought: Optional[int] = None
+    stop_loss_points: Optional[float] = None
+    take_profit_points_quick: Optional[float] = None
+    take_profit_points_extended: Optional[float] = None
 
 
 @dataclass
@@ -218,8 +234,8 @@ class ConfigLoader:
             raise ValueError("RSI period must be positive")
         
         # Validate signal rules
-        if config.signal_rules.volume_spike_threshold <= 1.0:
-            raise ValueError("Volume spike threshold must be greater than 1.0")
+        if config.signal_rules.volume_spike_threshold <= 0:
+            raise ValueError("Volume spike threshold must be positive")
         
         if not (0 <= config.signal_rules.rsi_min <= 100):
             raise ValueError("RSI min must be between 0 and 100")
