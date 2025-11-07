@@ -22,7 +22,7 @@ class YFinanceClient:
     Compatible with the MarketDataClient interface but uses yfinance backend.
     """
     
-    def __init__(self, symbol: str, timeframes: List[str], buffer_size: int = 500):
+    def __init__(self, symbol: str, timeframes: List[str], buffer_size: int = 500, price_offset: float = 0.0):
         """
         Initialize YFinance client.
         
@@ -30,10 +30,15 @@ class YFinanceClient:
             symbol: Yahoo Finance symbol (e.g., 'GC=F' for Gold Futures, 'XAUUSD=X' for Gold Spot)
             timeframes: List of timeframes to monitor (e.g., ['1m', '5m', '15m', '1h', '4h', '1d'])
             buffer_size: Maximum number of candles to keep in memory per timeframe (default: 500)
+            price_offset: Amount to add/subtract from all prices (e.g., -5.0 to convert futures to spot)
         """
         self.symbol = symbol
         self.timeframes = timeframes
         self.buffer_size = buffer_size
+        self.price_offset = price_offset
+        
+        if price_offset != 0:
+            logger.info(f"Price offset enabled: {price_offset:+.2f} (futures -> spot adjustment)")
         
         # Initialize ticker
         self.ticker = None
@@ -166,6 +171,13 @@ class YFinanceClient:
                 nan_count = df[col].isna().sum()
                 if nan_count > 0:
                     logger.warning(f"{nan_count} NaN values found in '{col}' column for {timeframe}")
+            
+            # Apply price offset if configured (e.g., convert futures to spot)
+            if self.price_offset != 0:
+                price_cols = ['open', 'high', 'low', 'close']
+                for col in price_cols:
+                    df[col] = df[col] + self.price_offset
+                logger.debug(f"Applied price offset {self.price_offset:+.2f} to {timeframe} data")
             
             # Take last 'count' rows
             df = df.tail(count)

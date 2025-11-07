@@ -78,11 +78,16 @@ def main():
     logger.info("Initializing components...")
     
     # Use YFinance client for Gold data
+    price_offset = config['exchange'].get('price_offset', 0.0)
     market_client = YFinanceClient(
         symbol='GC=F',  # Gold Futures
         timeframes=config['exchange']['timeframes'],
-        buffer_size=200
+        buffer_size=200,
+        price_offset=price_offset  # Convert futures to spot prices
     )
+    
+    if price_offset != 0:
+        logger.info(f"Price offset: {price_offset:+.2f} (adjusting futures to match spot prices)")
     
     indicator_calc = IndicatorCalculator()
     

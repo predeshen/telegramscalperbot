@@ -226,7 +226,21 @@ class GoldSignalDetector:
             
             # Bullish Momentum Shift: RSI(7) turning up
             if rsi_7_current > rsi_7_prev and rsi_7_prev > rsi_7_prev2:
+                # CRITICAL: Check if we're actually in an uptrend
+                # Don't generate LONG signals in a downtrend!
+                if last['close'] < last['ema_50']:
+                    logger.debug(f"[{timeframe}] Bullish RSI turn rejected - price below EMA(50): ${last['close']:.2f} < ${last['ema_50']:.2f} (downtrend)")
+                    return None
+                
+                # Check recent price action (last 10 candles should show upward bias)
+                if len(data) >= 10:
+                    recent_close = data['close'].iloc[-10]
+                    if last['close'] < recent_close:
+                        logger.debug(f"[{timeframe}] Bullish RSI turn rejected - price declining over last 10 candles: ${recent_close:.2f} -> ${last['close']:.2f}")
+                        return None
+                
                 logger.info(f"[{timeframe}] Bullish momentum shift detected - RSI(7): {rsi_7_prev2:.1f} -> {rsi_7_prev:.1f} -> {rsi_7_current:.1f} (turning up)")
+                logger.info(f"[{timeframe}] Trend confirmed: Price ${last['close']:.2f} > EMA(50) ${last['ema_50']:.2f}")
                 logger.info(f"[{timeframe}] ADX: {last['adx']:.1f}, Volume: {volume_ratio:.2f}x")
                 
                 entry = last['close']
@@ -250,7 +264,21 @@ class GoldSignalDetector:
             
             # Bearish Momentum Shift: RSI(7) turning down
             elif rsi_7_current < rsi_7_prev and rsi_7_prev < rsi_7_prev2:
+                # CRITICAL: Check if we're actually in a downtrend
+                # Don't generate SHORT signals in an uptrend!
+                if last['close'] > last['ema_50']:
+                    logger.debug(f"[{timeframe}] Bearish RSI turn rejected - price above EMA(50): ${last['close']:.2f} > ${last['ema_50']:.2f} (uptrend)")
+                    return None
+                
+                # Check recent price action (last 10 candles should show downward bias)
+                if len(data) >= 10:
+                    recent_close = data['close'].iloc[-10]
+                    if last['close'] > recent_close:
+                        logger.debug(f"[{timeframe}] Bearish RSI turn rejected - price rising over last 10 candles: ${recent_close:.2f} -> ${last['close']:.2f}")
+                        return None
+                
                 logger.info(f"[{timeframe}] Bearish momentum shift detected - RSI(7): {rsi_7_prev2:.1f} -> {rsi_7_prev:.1f} -> {rsi_7_current:.1f} (turning down)")
+                logger.info(f"[{timeframe}] Trend confirmed: Price ${last['close']:.2f} < EMA(50) ${last['ema_50']:.2f}")
                 logger.info(f"[{timeframe}] ADX: {last['adx']:.1f}, Volume: {volume_ratio:.2f}x")
                 
                 entry = last['close']

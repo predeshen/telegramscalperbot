@@ -4,6 +4,8 @@
     "symbol": "XAU/USD",
     "data_source": "Yahoo Finance (GC=F - Gold Futures)",
     "data_source_note": "Prices may differ slightly from spot XAU/USD on your broker. Typical variance: 0.1-0.5%. Always verify prices on your broker platform before entering trades.",
+    "price_offset": -5.0,
+    "price_offset_note": "Subtract this amount from futures prices to approximate spot prices. Adjust based on your broker. Set to 0 to disable.",
     "timeframes": ["1m", "5m", "4h"]
   },
   "indicators": {
