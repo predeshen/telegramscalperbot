@@ -145,9 +145,20 @@ class TestSignalDetector:
         signal1 = signal_detector.detect_signals(bullish_confluence_data, '5m')
         assert signal1 is not None
         
+        # Verify signal was added to history
+        assert len(signal_detector.signal_history) == 1, f"First signal should be in history, but history has {len(signal_detector.signal_history)} signals"
+        print(f"Signal 1 timestamp: {signal1.timestamp}, entry: {signal1.entry_price}")
+        print(f"History has {len(signal_detector.signal_history)} signals")
+        
         # Try to generate same signal immediately
         signal2 = signal_detector.detect_signals(bullish_confluence_data, '5m')
-        assert signal2 is None  # Should be blocked
+        
+        if signal2:
+            print(f"Signal 2 timestamp: {signal2.timestamp}, entry: {signal2.entry_price}")
+            print(f"History now has {len(signal_detector.signal_history)} signals")
+        
+        # Should be blocked as duplicate
+        assert signal2 is None, f"Second signal should be blocked as duplicate"
     
     def test_duplicate_signal_allowed_after_time(self, signal_detector, bullish_confluence_data):
         """Test that signals are allowed after time window expires."""

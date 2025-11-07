@@ -18,6 +18,8 @@ from src.trend_analyzer import TrendAnalyzer
 
 from src.h4_hvg_detector import GapInfo, H4HVGDetector
 
+from src.symbol_context import SymbolContext
+
 
 
 
@@ -42,8 +44,9 @@ class Signal:
     market_bias: str  # "bullish", "bearish", "neutral"
     confidence: int  # 3-5 (number of confluence factors met)
     indicators: Dict[str, float]  # Snapshot of indicator values
+    symbol_context: Optional[SymbolContext] = None  # Symbol context (required for new signals)
     reasoning: str = ""  # Detailed explanation of why this signal was generated
-    symbol: str = "BTC/USD"  # Trading symbol (e.g., "BTC/USD", "XAU/USD", "US30")
+    symbol: str = "BTC/USD"  # Trading symbol (e.g., "BTC/USD", "XAU/USD", "US30") - DEPRECATED, use symbol_context
 
     strategy: str = ""  # Strategy name (e.g., "Trend Following", "EMA Crossover")
 
@@ -59,12 +62,41 @@ class Signal:
     confluence_factors: Optional[List[str]] = None  # List of confluence factors
 
     
+    def __post_init__(self):
+        """Validate symbol context on creation"""
+        # If symbol_context not provided, create from legacy symbol field
+        if self.symbol_context is None and self.symbol:
+            # Try to extract internal symbol from legacy format
+            symbol_map = {
+                "BTC/USD": "BTC",
+                "BTC": "BTC",
+                "XAU/USD": "XAUUSD",
+                "XAUUSD": "XAUUSD",
+                "US30": "US30"
+            }
+            internal_symbol = symbol_map.get(self.symbol, "BTC")
+            try:
+                self.symbol_context = SymbolContext.from_symbol(internal_symbol)
+                logger.debug(f"Created symbol context from legacy symbol: {self.symbol} -> {internal_symbol}")
+            except ValueError as e:
+                logger.error(f"Failed to create symbol context from legacy symbol '{self.symbol}': {e}")
+                raise ValueError(f"Signal must have valid symbol context. Legacy symbol '{self.symbol}' could not be converted.")
+        
+        # Validate symbol context
+        if self.symbol_context and not self.symbol_context.validate():
+            raise ValueError("Signal must have valid symbol context")
+
+    
 
     def to_dict(self) -> dict:
 
         """Convert signal to dictionary."""
 
-        return asdict(self)
+        data = asdict(self)
+        # Convert symbol_context to dict if present
+        if self.symbol_context:
+            data['symbol_context'] = self.symbol_context.to_dict()
+        return data
 
     
 
@@ -178,26 +210,60 @@ class SignalDetector:
 
         self.signal_history: deque = deque(maxlen=50)
         
-        # H4 HVG detector (will be initialized when needed)
+        # H4 HVG detector - will be initialized per-symbol when needed
+        # This allows it to work for BTC, Gold, US30, etc.
         self.h4_hvg_detector = None
+        self.h4_hvg_detectors = {}  # Cache of detectors per symbol
+        
+        # Config for optional features (can be set externally)
+        self.config = {}
 
         
 
         logger.info("Initialized SignalDetector with confluence rules")
     
+    def _create_symbol_context(self, symbol: str) -> SymbolContext:
+        """
+        Create SymbolContext from symbol string
+        
+        Args:
+            symbol: Symbol string (can be legacy format like "BTC/USD" or internal like "BTC")
+            
+        Returns:
+            SymbolContext instance
+        """
+        # Map legacy symbol formats to internal symbols
+        symbol_map = {
+            "BTC/USD": "BTC",
+            "BTC": "BTC",
+            "XAU/USD": "XAUUSD",
+            "XAUUSD": "XAUUSD",
+            "US30": "US30"
+        }
+        
+        internal_symbol = symbol_map.get(symbol, symbol)
+        
+        try:
+            return SymbolContext.from_symbol(internal_symbol)
+        except ValueError:
+            # Fallback to BTC if unknown
+            logger.warning(f"Unknown symbol '{symbol}', defaulting to BTC")
+            return SymbolContext.from_symbol("BTC")
+    
     def configure_h4_hvg(self, h4_hvg_config: dict, symbol: str) -> None:
         """
-        Configure H4 HVG detector with specific settings.
+        Configure H4 HVG detector with specific settings for a symbol.
         
         Args:
             h4_hvg_config: H4 HVG configuration dictionary
-            symbol: Trading symbol
+            symbol: Trading symbol (BTC/USD, XAU/USD, US30, etc.)
         """
         try:
-            self.h4_hvg_detector = H4HVGDetector(config=h4_hvg_config, symbol=symbol)
-            logger.info(f"H4HVGDetector configured for {symbol}")
+            # Create detector with custom config for this symbol
+            self.h4_hvg_detectors[symbol] = H4HVGDetector(config=h4_hvg_config, symbol=symbol)
+            logger.info(f"H4HVGDetector configured for {symbol} with custom settings")
         except Exception as e:
-            logger.error(f"Error configuring H4HVGDetector: {e}")
+            logger.error(f"Error configuring H4HVGDetector for {symbol}: {e}")
 
     
 
@@ -300,6 +366,7 @@ class SignalDetector:
     def _detect_h4_hvg(self, data: pd.DataFrame, timeframe: str, symbol: str) -> Optional[Signal]:
         """
         Detect H4 HVG signals using the H4HVGDetector.
+        Works for all symbols (BTC, Gold, US30, etc.)
         
         Args:
             data: DataFrame with OHLCV and indicators
@@ -310,30 +377,31 @@ class SignalDetector:
             Signal object if H4 HVG detected, None otherwise
         """
         try:
-            # Initialize H4 HVG detector if not already done
-            if self.h4_hvg_detector is None:
-                # Use default configuration for now
-                # In production, this should come from the main configuration
-                self.h4_hvg_detector = H4HVGDetector(symbol=symbol)
+            # Get or create H4 HVG detector for this symbol
+            if symbol not in self.h4_hvg_detectors:
+                # Initialize detector for this symbol
+                self.h4_hvg_detectors[symbol] = H4HVGDetector(symbol=symbol)
                 logger.info(f"Initialized H4HVGDetector for {symbol}")
             
+            detector = self.h4_hvg_detectors[symbol]
+            
             # Generate H4 HVG signal
-            signal = self.h4_hvg_detector.generate_h4_hvg_signal(data, timeframe, symbol)
+            signal = detector.generate_h4_hvg_signal(data, timeframe, symbol)
             
             if signal:
                 # Check for duplicates using H4 HVG detector's own duplicate detection
-                if not self.h4_hvg_detector.is_duplicate_signal(signal):
+                if not detector.is_duplicate_signal(signal):
                     # Add to H4 HVG detector's history
-                    self.h4_hvg_detector.add_signal_to_history(signal)
+                    detector.add_signal_to_history(signal)
                     return signal
                 else:
-                    logger.debug("H4 HVG signal rejected as duplicate")
+                    logger.debug(f"H4 HVG signal rejected as duplicate for {symbol}")
                     return None
             
             return None
             
         except Exception as e:
-            logger.error(f"Error detecting H4 HVG signal: {e}")
+            logger.error(f"Error detecting H4 HVG signal for {symbol}: {e}")
             return None
 
     
@@ -491,6 +559,8 @@ class SignalDetector:
                 timeframe=timeframe,
 
                 symbol=symbol,
+
+                symbol_context=self._create_symbol_context(symbol),
 
                 entry_price=entry_price,
 
@@ -696,6 +766,8 @@ class SignalDetector:
 
                 symbol=symbol,
 
+                symbol_context=self._create_symbol_context(symbol),
+
                 entry_price=entry_price,
 
                 stop_loss=stop_loss,
@@ -770,6 +842,10 @@ class SignalDetector:
 
         
 
+        logger.debug(f"Checking for duplicates: history has {len(self.signal_history)} signals, threshold={self.duplicate_time_window_minutes}min")
+
+        
+
         for prev_signal in self.signal_history:
 
             # Check same signal type
@@ -796,9 +872,13 @@ class SignalDetector:
 
                 
 
+                logger.debug(f"Checking duplicate: time_diff={time_diff.total_seconds()}s, price_change={price_change_percent:.4f}%, threshold={self.duplicate_price_threshold_percent}%")
+
+                
+
                 if price_change_percent < self.duplicate_price_threshold_percent:
 
-                    logger.debug(f"Duplicate signal blocked: {signal.signal_type} within {time_diff.seconds}s")
+                    logger.debug(f"Duplicate signal blocked: {signal.signal_type} within {time_diff.total_seconds()}s, price change {price_change_percent:.4f}%")
 
                     return True
 
@@ -810,9 +890,19 @@ class SignalDetector:
 
     def _clean_expired_signals(self) -> None:
 
-        """Remove signals older than 30 minutes from history."""
+        """Remove signals older than 30 minutes from the most recent signal."""
 
-        cutoff_time = datetime.now() - timedelta(minutes=30)
+        if not self.signal_history:
+
+            return
+
+        
+
+        # Use the most recent signal's timestamp as reference
+
+        most_recent_time = max(s.timestamp for s in self.signal_history)
+
+        cutoff_time = most_recent_time - timedelta(minutes=30)
 
         
 
@@ -1058,6 +1148,8 @@ class SignalDetector:
 
                     symbol=symbol,
 
+                    symbol_context=self._create_symbol_context(symbol),
+
                     entry_price=entry_price,
 
                     stop_loss=stop_loss,
@@ -1199,6 +1291,8 @@ class SignalDetector:
                     timeframe=timeframe,
 
                     symbol=symbol,
+
+                    symbol_context=self._create_symbol_context(symbol),
 
                     entry_price=entry_price,
 
@@ -1615,6 +1709,7 @@ class SignalDetector:
                     indicators=last.to_dict(),
                     reasoning=reasoning,
                     symbol=symbol,
+                    symbol_context=self._create_symbol_context(symbol),
                     strategy="Extreme RSI Continuation"
                 )
                 
@@ -1671,6 +1766,7 @@ class SignalDetector:
                     indicators=last.to_dict(),
                     reasoning=reasoning,
                     symbol=symbol,
+                    symbol_context=self._create_symbol_context(symbol),
                     strategy="Extreme RSI Continuation"
                 )
                 

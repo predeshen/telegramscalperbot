@@ -1,0 +1,46 @@
+{
+  "events": [
+    {
+      "title": "US Non-Farm Payrolls",
+      "datetime_gmt": "2025-11-02T13:30:00+00:00",
+      "impact": "high",
+      "currency": "USD",
+      "description": "High-impact USD economic data release"
+    },
+    {
+      "title": "US GDP",
+      "datetime_gmt": "2025-11-05T13:30:00+00:00",
+      "impact": "high",
+      "currency": "USD",
+      "description": "High-impact USD economic data release"
+    },
+    {
+      "title": "ECB Interest Rate Decision",
+      "datetime_gmt": "2025-11-08T12:45:00+00:00",
+      "impact": "high",
+      "currency": "EUR",
+      "description": "High-impact EUR economic data release"
+    },
+    {
+      "title": "FOMC Interest Rate Decision",
+      "datetime_gmt": "2025-11-11T19:00:00+00:00",
+      "impact": "high",
+      "currency": "USD",
+      "description": "High-impact USD economic data release"
+    },
+    {
+      "title": "FOMC Press Conference",
+      "datetime_gmt": "2025-11-14T19:30:00+00:00",
+      "impact": "high",
+      "currency": "USD",
+      "description": "High-impact USD economic data release"
+    },
+    {
+      "title": "US Non-Farm Payrolls (NFP)",
+      "datetime_gmt": "2025-11-07T13:30:00+00:00",
+      "impact": "high",
+      "currency": "USD",
+      "description": "Monthly employment report - major Gold mover"
+    }
+  ]
+}

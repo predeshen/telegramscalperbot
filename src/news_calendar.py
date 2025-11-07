@@ -1,9 +1,6 @@
 """
 News Calendar for Gold Trading
 Manages economic events and trading pauses around high-impact news
-
-DEPRECATED: This module has been moved to src/news_calendar.py
-Please update imports to use: from src.news_calendar import NewsCalendar
 """
 import json
 from datetime import datetime, timedelta, timezone
@@ -45,7 +42,7 @@ class NewsCalendar:
     Pauses trading 30 minutes before high-impact news.
     """
     
-    def __init__(self, events_file: str = "xauusd_scanner/news_events.json"):
+    def __init__(self, events_file: str = "config/news_events.json"):
         """
         Initialize News Calendar.
         

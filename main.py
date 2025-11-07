@@ -15,6 +15,7 @@ from src.alerter import EmailAlerter, TelegramAlerter, MultiAlerter
 from src.health_monitor import HealthMonitor, setup_logging
 from src.excel_reporter import ExcelReporter
 from src.trade_tracker import TradeTracker
+from src.news_calendar import NewsCalendar
 
 
 logger = logging.getLogger(__name__)
@@ -84,6 +85,10 @@ class BTCScalpingScanner:
             }
             self.signal_detector.configure_h4_hvg(h4_hvg_config, self.config.exchange.symbol)
             logger.info("H4 HVG detection enabled for BTC scalping")
+        
+        # Initialize news calendar
+        self.news_calendar = NewsCalendar()
+        logger.info("News calendar initialized for BTC scanner")
         
         # Initialize alerters
         email_alerter = None
@@ -196,12 +201,19 @@ class BTCScalpingScanner:
                     df = self.market_client.get_latest_candles(self.config.exchange.timeframes[0], 10)
                     current_price = df.iloc[-1]['close'] if not df.empty else 0
                     
+                    # Get news status
+                    news_status = self.news_calendar.get_news_status()
+                    news_info = ""
+                    if news_status['next_event']:
+                        next_event = news_status['next_event']
+                        news_info = f"\n📰 Next Event: {next_event['title']} in {int(next_event['minutes_until'])}min"
+                    
                     startup_msg = (
                         f"🟢 <b>BTC Scalping Scanner Started</b>\n\n"
                         f"💰 Current Price: ${current_price:,.2f}\n"
                         f"⏰ Timeframes: {', '.join(self.config.exchange.timeframes)}\n"
                         f"🎯 Strategy: EMA Crossover + Volume Confirmation\n"
-                        f"📊 Exchange: {self.config.exchange.name.upper()}\n\n"
+                        f"📊 Exchange: {self.config.exchange.name.upper()}{news_info}\n\n"
                         f"🔍 Scanning for scalping opportunities..."
                     )
                     self.alerter.send_message(startup_msg)
@@ -216,13 +228,43 @@ class BTCScalpingScanner:
             
             # Main loop - poll for new data every 10 seconds
             logger.info("Starting main polling loop (10-second intervals)...")
+            last_news_pause = False
+            
             while self.running and not self.shutdown_event.is_set():
                 try:
+                    # Check news calendar
+                    should_pause_news, news_reason = self.news_calendar.should_pause_trading()
+                    
+                    if should_pause_news != last_news_pause:
+                        if should_pause_news:
+                            logger.warning(f"📰 Trading paused: {news_reason}")
+                            if self.alerter:
+                                self.alerter.send_message(f"⏸️ *BTC Trading Paused*\n\n{news_reason}")
+                        else:
+                            logger.info("✅ Trading resumed after news")
+                            if self.alerter:
+                                self.alerter.send_message("▶️ *BTC Trading Resumed*\n\nNews event passed, back to normal trading.")
+                        
+                        last_news_pause = should_pause_news
+                    
+                    # Skip trading if paused for news
+                    if should_pause_news:
+                        time.sleep(60)
+                        continue
+                    
                     # Fetch latest data for each timeframe
                     for timeframe in self.config.exchange.timeframes:
-                        df = self.market_client.get_latest_candles(timeframe, 500)
+                        try:
+                            df = self.market_client.get_latest_candles(timeframe, 500)
+                            
+                            if df.empty:
+                                logger.error(f"Received empty DataFrame for {timeframe} - skipping this iteration")
+                                continue
+                        except Exception as e:
+                            logger.error(f"Failed to fetch data for {timeframe}: {e}")
+                            continue
                         
-                        if not df.empty:
+                        # Process data (we know it's not empty here)
                             # Update health monitor
                             self.health_monitor.update_data_timestamp(df.iloc[-1]['timestamp'])
                             

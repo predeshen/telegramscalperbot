@@ -157,14 +157,15 @@ class TestIndicatorCalculator:
         assert not result['rsi'].isna().any()
     
     def test_calculate_all_indicators_empty_data(self):
-        """Test handling of empty DataFrame."""
+        """Test that empty DataFrame raises error (should never happen in production)."""
         empty_df = pd.DataFrame()
-        result = IndicatorCalculator.calculate_all_indicators(empty_df)
         
-        assert result.empty
+        # Should raise ValueError - this is a critical error that should never happen
+        with pytest.raises(ValueError, match="Cannot calculate indicators on empty DataFrame"):
+            IndicatorCalculator.calculate_all_indicators(empty_df)
     
     def test_calculate_all_indicators_insufficient_data(self):
-        """Test handling of insufficient data."""
+        """Test that insufficient data raises error (should never happen in production)."""
         small_df = pd.DataFrame({
             'timestamp': pd.date_range('2025-01-01', periods=5, freq='1min'),
             'open': [65000, 65100, 65050, 65150, 65200],
@@ -174,7 +175,6 @@ class TestIndicatorCalculator:
             'volume': [100, 150, 120, 180, 200]
         })
         
-        result = IndicatorCalculator.calculate_all_indicators(small_df)
-        
-        # Should handle gracefully, may return empty or partial data
-        assert isinstance(result, pd.DataFrame)
+        # Should raise ValueError - we always request 500 candles in production
+        with pytest.raises(ValueError, match="Data validation failed"):
+            IndicatorCalculator.calculate_all_indicators(small_df)

@@ -37,9 +37,12 @@ class IndicatorCalculator:
             return False, f"Missing required columns: {', '.join(missing_columns)}"
         
         # Check for sufficient rows
+        # We need at least the maximum period for indicators to calculate properly
         max_period = max(required_periods) if required_periods else 200
+        
+        # Only require exactly the max period - indicators will handle warmup internally
         if len(data) < max_period:
-            return False, f"Insufficient data: need {max_period} rows, got {len(data)}"
+            return False, f"Insufficient data: need at least {max_period} rows, got {len(data)}"
         
         # Check for NaN values in OHLCV columns
         ohlcv_cols = ['open', 'high', 'low', 'close', 'volume']
@@ -467,14 +470,23 @@ class IndicatorCalculator:
             ValueError: If data validation fails
         """
         if data.empty:
-            logger.error("Empty DataFrame provided to calculate_all_indicators")
+            logger.error("CRITICAL: Empty DataFrame provided to calculate_all_indicators")
+            logger.error("This should NEVER happen in production - check data source!")
             raise ValueError("Cannot calculate indicators on empty DataFrame")
         
         # Validate data before calculations
         all_periods = ema_periods + [atr_period, rsi_period, volume_ma_period]
         is_valid, error_msg = IndicatorCalculator.validate_data_for_indicators(data, all_periods)
         if not is_valid:
+            max_period = max(all_periods)
             logger.error(f"Data validation failed: {error_msg}")
+            logger.error(f"Received {len(data)} rows, max indicator period is {max_period}")
+            
+            # Check if this is a market hours issue (like US30)
+            if len(data) > max_period * 0.8:  # Within 80% of requirement
+                logger.warning("This may be due to limited market hours (e.g., US30 index)")
+                logger.warning("Consider using longer timeframes (4h, 1d) for indices")
+            
             raise ValueError(f"Data validation failed: {error_msg}")
         
         logger.info(f"Calculating indicators on {len(data)} candles")
