@@ -97,6 +97,11 @@ def main():
         duplicate_price_threshold_percent=config['signal_detection']['duplicate_price_threshold_percent']
     )
     
+    # Set config for new detection strategies
+    signal_detector.config = {
+        'signal_rules': config.get('signal_detection', {})
+    }
+    
     # Configure H4 HVG if enabled
     if config.get('h4_hvg', {}).get('enabled', False):
         signal_detector.configure_h4_hvg(config['h4_hvg'], config['symbol'])

@@ -67,6 +67,23 @@ class BTCScalpingScanner:
             duplicate_price_threshold_percent=self.config.signal_rules.duplicate_price_threshold_percent
         )
         
+        # Set config for new detection strategies
+        self.signal_detector.config = {
+            'signal_rules': {
+                'volume_momentum_shift': self.config.signal_rules.volume_momentum_shift,
+                'volume_trend_alignment': self.config.signal_rules.volume_trend_alignment,
+                'volume_ema_cloud_breakout': self.config.signal_rules.volume_ema_cloud_breakout,
+                'volume_mean_reversion': self.config.signal_rules.volume_mean_reversion,
+                'rsi_momentum_threshold': self.config.signal_rules.rsi_momentum_threshold,
+                'adx_min_momentum_shift': self.config.signal_rules.adx_min_momentum_shift,
+                'adx_min_trend_alignment': self.config.signal_rules.adx_min_trend_alignment,
+                'adx_min_trend': self.config.signal_rules.adx_min_trend,
+                'momentum_shift_sl_multiplier': self.config.signal_rules.momentum_shift_sl_multiplier,
+                'momentum_shift_tp_multiplier': self.config.signal_rules.momentum_shift_tp_multiplier,
+                'enable_extreme_rsi_signals': self.config.signal_rules.enable_extreme_rsi_signals,
+            }
+        }
+        
         # Configure H4 HVG if enabled
         if self.config.h4_hvg and self.config.h4_hvg.enabled:
             # Convert dataclass to dict for H4HVGDetector
