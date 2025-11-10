@@ -48,6 +48,14 @@ class SignalRulesConfig:
     key_level_threshold_pips: Optional[float] = None
     stoch_oversold: Optional[int] = None
     stoch_overbought: Optional[int] = None
+    # New strategy-specific volume thresholds
+    volume_momentum_shift: Optional[float] = None
+    volume_trend_alignment: Optional[float] = None
+    volume_ema_cloud_breakout: Optional[float] = None
+    volume_mean_reversion: Optional[float] = None
+    # New strategy-specific multipliers
+    momentum_shift_sl_multiplier: Optional[float] = None
+    momentum_shift_tp_multiplier: Optional[float] = None
     stop_loss_points: Optional[float] = None
     take_profit_points_quick: Optional[float] = None
     take_profit_points_extended: Optional[float] = None
