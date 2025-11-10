@@ -264,6 +264,696 @@ class SignalDetector:
             logger.info(f"H4HVGDetector configured for {symbol} with custom settings")
         except Exception as e:
             logger.error(f"Error configuring H4HVGDetector for {symbol}: {e}")
+    
+    def _detect_mean_reversion(self, data: pd.DataFrame, timeframe: str, symbol: str = "BTC/USD") -> Optional[Signal]:
+        """
+        Detect mean reversion signals.
+        
+        Strategy:
+        - Price overextended (> 1.5 ATR from VWAP)
+        - RSI extremes (< 25 oversold or > 75 overbought)
+        - Reversal candle patterns (pin bar, doji, engulfing)
+        - Volume >= 1.3x average
+        - Target VWAP for mean reversion
+        
+        Args:
+            data: DataFrame with indicators
+            timeframe: Timeframe string
+            symbol: Trading symbol
+            
+        Returns:
+            Signal if detected, None otherwise
+        """
+        try:
+            if len(data) < 3:
+                return None
+            
+            last = data.iloc[-1]
+            prev = data.iloc[-2]
+            
+            # Check for required indicators
+            required_indicators = ['vwap', 'rsi', 'atr', 'volume', 'volume_ma']
+            if not all(ind in last.index for ind in required_indicators):
+                logger.debug(f"[{timeframe}] Missing required indicators for mean reversion detection")
+                return None
+            
+            # Check for NaN values
+            if pd.isna(last['vwap']) or pd.isna(last['rsi']) or pd.isna(last['atr']):
+                logger.warning(f"[{timeframe}] NaN values in indicators, skipping mean reversion")
+                return None
+            
+            # Get configuration values
+            volume_threshold = self.config.get('signal_rules', {}).get('volume_mean_reversion', 1.3)
+            
+            atr = last['atr']
+            vwap = last['vwap']
+            current_price = last['close']
+            
+            # Check overextension (> 1.5 ATR from VWAP)
+            distance_from_vwap = abs(current_price - vwap)
+            
+            if distance_from_vwap < (atr * 1.5):
+                logger.debug(f"[{timeframe}] Price not overextended: distance {distance_from_vwap:.2f} < {atr * 1.5:.2f} (1.5 ATR)")
+                return None
+            
+            # Check RSI extremes
+            rsi_overbought = last['rsi'] > 75
+            rsi_oversold = last['rsi'] < 25
+            
+            if not (rsi_overbought or rsi_oversold):
+                logger.debug(f"[{timeframe}] RSI not extreme: {last['rsi']:.1f} (need < 25 or > 75)")
+                return None
+            
+            # Calculate volume ratio
+            volume_ratio = last['volume'] / last['volume_ma']
+            
+            # Check volume confirmation
+            if volume_ratio < volume_threshold:
+                logger.debug(f"[{timeframe}] Volume too low: {volume_ratio:.2f}x (need >= {volume_threshold}x)")
+                return None
+            
+            # Detect reversal candles
+            is_pin_bar = self._is_pin_bar(last)
+            is_engulfing = self._is_engulfing(last, prev)
+            is_doji = self._is_doji(last)
+            
+            if not (is_pin_bar or is_engulfing or is_doji):
+                logger.debug(f"[{timeframe}] No reversal pattern detected")
+                return None
+            
+            pattern_name = "pin bar" if is_pin_bar else ("engulfing" if is_engulfing else "doji")
+            
+            # Bullish reversal (price below VWAP, oversold)
+            if current_price < vwap and rsi_oversold:
+                logger.info(f"[{timeframe}] Bullish mean reversion detected - Price ${current_price:.2f} < VWAP ${vwap:.2f}, RSI {last['rsi']:.1f}, {pattern_name} pattern")
+                logger.info(f"[{timeframe}] Overextension: {distance_from_vwap:.2f} ({distance_from_vwap/atr:.1f} ATR), Volume {volume_ratio:.2f}x")
+                
+                entry = last['close']
+                stop_loss = entry - (atr * 1.0)
+                take_profit = vwap  # Target mean (VWAP)
+                
+                # Calculate risk/reward
+                risk = abs(entry - stop_loss)
+                reward = abs(take_profit - entry)
+                risk_reward = reward / risk if risk > 0 else 0
+                
+                signal = Signal(
+                    timestamp=last['timestamp'],
+                    signal_type="LONG",
+                    timeframe=timeframe,
+                    symbol=symbol,
+                    symbol_context=self._create_symbol_context(symbol),
+                    entry_price=entry,
+                    stop_loss=stop_loss,
+                    take_profit=take_profit,
+                    atr=atr,
+                    risk_reward=risk_reward,
+                    market_bias="neutral",
+                    confidence=4,
+                    indicators={
+                        'vwap': vwap,
+                        'rsi': last['rsi'],
+                        'atr': atr,
+                        'volume': last['volume'],
+                        'volume_ma': last['volume_ma']
+                    },
+                    reasoning=f"Mean Reversion: Price overextended {distance_from_vwap/atr:.1f} ATR below VWAP, RSI {last['rsi']:.1f}, {pattern_name} reversal, Volume {volume_ratio:.2f}x",
+                    strategy="Mean Reversion"
+                )
+                
+                return signal
+            
+            # Bearish reversal (price above VWAP, overbought)
+            elif current_price > vwap and rsi_overbought:
+                logger.info(f"[{timeframe}] Bearish mean reversion detected - Price ${current_price:.2f} > VWAP ${vwap:.2f}, RSI {last['rsi']:.1f}, {pattern_name} pattern")
+                logger.info(f"[{timeframe}] Overextension: {distance_from_vwap:.2f} ({distance_from_vwap/atr:.1f} ATR), Volume {volume_ratio:.2f}x")
+                
+                entry = last['close']
+                stop_loss = entry + (atr * 1.0)
+                take_profit = vwap  # Target mean (VWAP)
+                
+                # Calculate risk/reward
+                risk = abs(stop_loss - entry)
+                reward = abs(entry - take_profit)
+                risk_reward = reward / risk if risk > 0 else 0
+                
+                signal = Signal(
+                    timestamp=last['timestamp'],
+                    signal_type="SHORT",
+                    timeframe=timeframe,
+                    symbol=symbol,
+                    symbol_context=self._create_symbol_context(symbol),
+                    entry_price=entry,
+                    stop_loss=stop_loss,
+                    take_profit=take_profit,
+                    atr=atr,
+                    risk_reward=risk_reward,
+                    market_bias="neutral",
+                    confidence=4,
+                    indicators={
+                        'vwap': vwap,
+                        'rsi': last['rsi'],
+                        'atr': atr,
+                        'volume': last['volume'],
+                        'volume_ma': last['volume_ma']
+                    },
+                    reasoning=f"Mean Reversion: Price overextended {distance_from_vwap/atr:.1f} ATR above VWAP, RSI {last['rsi']:.1f}, {pattern_name} reversal, Volume {volume_ratio:.2f}x",
+                    strategy="Mean Reversion"
+                )
+                
+                return signal
+            
+            return None
+            
+        except KeyError as e:
+            logger.error(f"Missing indicator in mean reversion detection: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Error in mean reversion detection: {e}", exc_info=True)
+            return None
+    
+    def _detect_ema_cloud_breakout(self, data: pd.DataFrame, timeframe: str, symbol: str = "BTC/USD") -> Optional[Signal]:
+        """
+        Detect EMA cloud breakout signals.
+        
+        Strategy:
+        - EMA(21) and EMA(50) aligned (bullish: EMA21 > EMA50, bearish: EMA21 < EMA50)
+        - Price vs VWAP (bullish: price > VWAP, bearish: price < VWAP)
+        - RSI in range 25-75 (avoid extremes)
+        - Volume >= 1.5x average (strong breakout)
+        - Range breakout (price breaks recent 10-candle high/low)
+        
+        Args:
+            data: DataFrame with indicators
+            timeframe: Timeframe string
+            symbol: Trading symbol
+            
+        Returns:
+            Signal if detected, None otherwise
+        """
+        try:
+            if len(data) < 11:  # Need 10 candles for range + current
+                return None
+            
+            last = data.iloc[-1]
+            prev = data.iloc[-2]
+            
+            # Check for required indicators
+            required_indicators = ['ema_21', 'ema_50', 'vwap', 'rsi', 'volume', 'volume_ma', 'atr']
+            if not all(ind in last.index for ind in required_indicators):
+                logger.debug(f"[{timeframe}] Missing required indicators for EMA cloud breakout detection")
+                return None
+            
+            # Check for NaN values
+            if pd.isna(last['ema_21']) or pd.isna(last['ema_50']) or pd.isna(last['vwap']):
+                logger.warning(f"[{timeframe}] NaN values in indicators, skipping EMA cloud breakout")
+                return None
+            
+            # Get configuration values
+            volume_threshold = self.config.get('signal_rules', {}).get('volume_ema_cloud_breakout', 1.5)
+            
+            # Check EMA alignment
+            bullish_alignment = last['ema_21'] > last['ema_50']
+            bearish_alignment = last['ema_21'] < last['ema_50']
+            
+            if not (bullish_alignment or bearish_alignment):
+                logger.debug(f"[{timeframe}] No EMA alignment: EMA21={last['ema_21']:.2f}, EMA50={last['ema_50']:.2f}")
+                return None
+            
+            # Check VWAP position
+            price_above_vwap = last['close'] > last['vwap']
+            price_below_vwap = last['close'] < last['vwap']
+            
+            # Check RSI range (avoid extremes)
+            if last['rsi'] < 25 or last['rsi'] > 75:
+                logger.debug(f"[{timeframe}] RSI extreme: {last['rsi']:.1f} (need 25-75 for breakout)")
+                return None
+            
+            # Calculate volume ratio
+            volume_ratio = last['volume'] / last['volume_ma']
+            
+            # Check volume threshold
+            if volume_ratio < volume_threshold:
+                logger.debug(f"[{timeframe}] Volume too low: {volume_ratio:.2f}x (need >= {volume_threshold}x)")
+                return None
+            
+            # Bullish setup
+            if bullish_alignment and price_above_vwap:
+                # Check for breakout (price breaking above recent 10-candle high)
+                recent_high = data['high'].iloc[-11:-1].max()
+                
+                logger.debug(f"[{timeframe}] Bullish EMA cloud: checking breakout above {recent_high:.2f}, current: {last['close']:.2f}")
+                
+                if last['close'] > recent_high:
+                    logger.info(f"[{timeframe}] Bullish EMA cloud breakout detected - Price {last['close']:.2f} > Recent high {recent_high:.2f}")
+                    logger.info(f"[{timeframe}] EMA21 {last['ema_21']:.2f} > EMA50 {last['ema_50']:.2f}, Price > VWAP {last['vwap']:.2f}, RSI {last['rsi']:.1f}, Volume {volume_ratio:.2f}x")
+                    
+                    entry = last['close']
+                    stop_loss = entry - (last['atr'] * 1.2)
+                    take_profit = entry + (last['atr'] * 1.5)
+                    risk_reward = (take_profit - entry) / (entry - stop_loss)
+                    
+                    signal = Signal(
+                        timestamp=last['timestamp'],
+                        signal_type="LONG",
+                        timeframe=timeframe,
+                        symbol=symbol,
+                        symbol_context=self._create_symbol_context(symbol),
+                        entry_price=entry,
+                        stop_loss=stop_loss,
+                        take_profit=take_profit,
+                        atr=last['atr'],
+                        risk_reward=risk_reward,
+                        market_bias="bullish",
+                        confidence=4,
+                        indicators={
+                            'ema_21': last['ema_21'],
+                            'ema_50': last['ema_50'],
+                            'vwap': last['vwap'],
+                            'rsi': last['rsi'],
+                            'volume': last['volume'],
+                            'volume_ma': last['volume_ma']
+                        },
+                        reasoning=f"EMA Cloud Breakout: Bullish alignment, price > VWAP, breakout above {recent_high:.2f}, Volume {volume_ratio:.2f}x",
+                        strategy="EMA Cloud Breakout"
+                    )
+                    
+                    return signal
+            
+            # Bearish setup
+            elif bearish_alignment and price_below_vwap:
+                # Check for breakdown (price breaking below recent 10-candle low)
+                recent_low = data['low'].iloc[-11:-1].min()
+                
+                logger.debug(f"[{timeframe}] Bearish EMA cloud: checking breakdown below {recent_low:.2f}, current: {last['close']:.2f}")
+                
+                if last['close'] < recent_low:
+                    logger.info(f"[{timeframe}] Bearish EMA cloud breakdown detected - Price {last['close']:.2f} < Recent low {recent_low:.2f}")
+                    logger.info(f"[{timeframe}] EMA21 {last['ema_21']:.2f} < EMA50 {last['ema_50']:.2f}, Price < VWAP {last['vwap']:.2f}, RSI {last['rsi']:.1f}, Volume {volume_ratio:.2f}x")
+                    
+                    entry = last['close']
+                    stop_loss = entry + (last['atr'] * 1.2)
+                    take_profit = entry - (last['atr'] * 1.5)
+                    risk_reward = (entry - take_profit) / (stop_loss - entry)
+                    
+                    signal = Signal(
+                        timestamp=last['timestamp'],
+                        signal_type="SHORT",
+                        timeframe=timeframe,
+                        symbol=symbol,
+                        symbol_context=self._create_symbol_context(symbol),
+                        entry_price=entry,
+                        stop_loss=stop_loss,
+                        take_profit=take_profit,
+                        atr=last['atr'],
+                        risk_reward=risk_reward,
+                        market_bias="bearish",
+                        confidence=4,
+                        indicators={
+                            'ema_21': last['ema_21'],
+                            'ema_50': last['ema_50'],
+                            'vwap': last['vwap'],
+                            'rsi': last['rsi'],
+                            'volume': last['volume'],
+                            'volume_ma': last['volume_ma']
+                        },
+                        reasoning=f"EMA Cloud Breakout: Bearish alignment, price < VWAP, breakdown below {recent_low:.2f}, Volume {volume_ratio:.2f}x",
+                        strategy="EMA Cloud Breakout"
+                    )
+                    
+                    return signal
+            
+            return None
+            
+        except KeyError as e:
+            logger.error(f"Missing indicator in EMA cloud breakout detection: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Error in EMA cloud breakout detection: {e}", exc_info=True)
+            return None
+    
+    def _detect_trend_alignment(self, data: pd.DataFrame, timeframe: str, symbol: str = "BTC/USD") -> Optional[Signal]:
+        """
+        Detect trend alignment signals - cascade EMA alignment with RSI confirmation.
+        
+        Strategy:
+        - Bullish: Price > EMA9 > EMA21 > EMA50 (cascade alignment)
+        - Bearish: Price < EMA9 < EMA21 < EMA50 (cascade alignment)
+        - RSI > 50 (bullish) or < 50 (bearish)
+        - RSI direction matches signal (rising for LONG, falling for SHORT)
+        - ADX >= 19 (strong trend)
+        - Volume >= 0.8x average
+        
+        Args:
+            data: DataFrame with indicators
+            timeframe: Timeframe string
+            symbol: Trading symbol
+            
+        Returns:
+            Signal if detected, None otherwise
+        """
+        try:
+            if len(data) < 3:
+                return None
+            
+            last = data.iloc[-1]
+            prev = data.iloc[-2]
+            
+            # Check for required indicators
+            required_indicators = ['ema_9', 'ema_21', 'ema_50', 'rsi', 'adx', 'volume', 'volume_ma', 'atr']
+            if not all(ind in last.index for ind in required_indicators):
+                logger.debug(f"[{timeframe}] Missing required indicators for trend alignment detection")
+                return None
+            
+            # Check for NaN values
+            if pd.isna(last['ema_9']) or pd.isna(last['ema_21']) or pd.isna(last['ema_50']):
+                logger.warning(f"[{timeframe}] NaN values in EMA indicators, skipping trend alignment")
+                return None
+            
+            # Get configuration values
+            adx_threshold = self.config.get('signal_rules', {}).get('adx_min_trend_alignment', 19)
+            volume_threshold = self.config.get('signal_rules', {}).get('volume_trend_alignment', 0.8)
+            
+            # Check ADX >= threshold (strong trend)
+            if last['adx'] < adx_threshold:
+                logger.debug(f"[{timeframe}] ADX too low: {last['adx']:.1f} (need >= {adx_threshold} for trend alignment)")
+                return None
+            
+            # Calculate volume ratio
+            volume_ratio = last['volume'] / last['volume_ma']
+            
+            # Check volume threshold
+            if volume_ratio < volume_threshold:
+                logger.debug(f"[{timeframe}] Volume too low: {volume_ratio:.2f}x (need >= {volume_threshold}x)")
+                return None
+            
+            # Check for bullish cascade alignment
+            is_bullish_cascade = (
+                last['close'] > last['ema_9'] and
+                last['ema_9'] > last['ema_21'] and
+                last['ema_21'] > last['ema_50']
+            )
+            
+            # Check for bearish cascade alignment
+            is_bearish_cascade = (
+                last['close'] < last['ema_9'] and
+                last['ema_9'] < last['ema_21'] and
+                last['ema_21'] < last['ema_50']
+            )
+            
+            # Log cascade status
+            logger.debug(f"[{timeframe}] Checking cascade: Price={last['close']:.2f}, EMA9={last['ema_9']:.2f}, EMA21={last['ema_21']:.2f}, EMA50={last['ema_50']:.2f}")
+            
+            if is_bullish_cascade:
+                logger.info(f"[{timeframe}] Bullish cascade detected: Price > EMA9 > EMA21 > EMA50")
+            elif is_bearish_cascade:
+                logger.info(f"[{timeframe}] Bearish cascade detected: Price < EMA9 < EMA21 < EMA50")
+            else:
+                logger.debug(f"[{timeframe}] No trend cascade detected")
+                return None
+            
+            # Check RSI direction (rising for bullish, falling for bearish)
+            rsi_rising = last['rsi'] > prev['rsi']
+            rsi_falling = last['rsi'] < prev['rsi']
+            
+            # Bullish Trend Alignment Signal
+            if is_bullish_cascade and last['rsi'] > 50 and rsi_rising:
+                logger.info(f"[{timeframe}] Bullish trend alignment conditions met - RSI: {last['rsi']:.1f} (rising), ADX: {last['adx']:.1f}, Volume: {volume_ratio:.2f}x")
+                
+                entry = last['close']
+                stop_loss = entry - (last['atr'] * self.stop_loss_atr_multiplier)
+                take_profit = entry + (last['atr'] * self.take_profit_atr_multiplier)
+                risk_reward = (take_profit - entry) / (entry - stop_loss)
+                
+                signal = Signal(
+                    timestamp=last['timestamp'],
+                    signal_type="LONG",
+                    timeframe=timeframe,
+                    symbol=symbol,
+                    symbol_context=self._create_symbol_context(symbol),
+                    entry_price=entry,
+                    stop_loss=stop_loss,
+                    take_profit=take_profit,
+                    atr=last['atr'],
+                    risk_reward=risk_reward,
+                    market_bias="bullish",
+                    confidence=4,
+                    indicators={
+                        'ema_9': last['ema_9'],
+                        'ema_21': last['ema_21'],
+                        'ema_50': last['ema_50'],
+                        'rsi': last['rsi'],
+                        'adx': last['adx'],
+                        'volume': last['volume'],
+                        'volume_ma': last['volume_ma']
+                    },
+                    reasoning=f"Trend Alignment: Bullish cascade with RSI {last['rsi']:.1f} rising, ADX {last['adx']:.1f}, Volume {volume_ratio:.2f}x",
+                    strategy="Trend Alignment (Bullish)"
+                )
+                
+                return signal
+            
+            # Bearish Trend Alignment Signal
+            elif is_bearish_cascade and last['rsi'] < 50 and rsi_falling:
+                logger.info(f"[{timeframe}] Bearish trend alignment conditions met - RSI: {last['rsi']:.1f} (falling), ADX: {last['adx']:.1f}, Volume: {volume_ratio:.2f}x")
+                
+                entry = last['close']
+                stop_loss = entry + (last['atr'] * self.stop_loss_atr_multiplier)
+                take_profit = entry - (last['atr'] * self.take_profit_atr_multiplier)
+                risk_reward = (entry - take_profit) / (stop_loss - entry)
+                
+                signal = Signal(
+                    timestamp=last['timestamp'],
+                    signal_type="SHORT",
+                    timeframe=timeframe,
+                    symbol=symbol,
+                    symbol_context=self._create_symbol_context(symbol),
+                    entry_price=entry,
+                    stop_loss=stop_loss,
+                    take_profit=take_profit,
+                    atr=last['atr'],
+                    risk_reward=risk_reward,
+                    market_bias="bearish",
+                    confidence=4,
+                    indicators={
+                        'ema_9': last['ema_9'],
+                        'ema_21': last['ema_21'],
+                        'ema_50': last['ema_50'],
+                        'rsi': last['rsi'],
+                        'adx': last['adx'],
+                        'volume': last['volume'],
+                        'volume_ma': last['volume_ma']
+                    },
+                    reasoning=f"Trend Alignment: Bearish cascade with RSI {last['rsi']:.1f} falling, ADX {last['adx']:.1f}, Volume {volume_ratio:.2f}x",
+                    strategy="Trend Alignment (Bearish)"
+                )
+                
+                return signal
+            
+            else:
+                # Log why signal was not generated
+                if is_bullish_cascade:
+                    if last['rsi'] <= 50:
+                        logger.debug(f"[{timeframe}] Bullish cascade but RSI too low: {last['rsi']:.1f} (need > 50)")
+                    elif not rsi_rising:
+                        logger.debug(f"[{timeframe}] Bullish cascade but RSI not rising: {prev['rsi']:.1f} -> {last['rsi']:.1f}")
+                elif is_bearish_cascade:
+                    if last['rsi'] >= 50:
+                        logger.debug(f"[{timeframe}] Bearish cascade but RSI too high: {last['rsi']:.1f} (need < 50)")
+                    elif not rsi_falling:
+                        logger.debug(f"[{timeframe}] Bearish cascade but RSI not falling: {prev['rsi']:.1f} -> {last['rsi']:.1f}")
+            
+            return None
+            
+        except KeyError as e:
+            logger.error(f"Missing indicator in trend alignment detection: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Error in trend alignment detection: {e}", exc_info=True)
+            return None
+    
+    def _detect_momentum_shift(self, data: pd.DataFrame, timeframe: str, symbol: str = "BTC/USD") -> Optional[Signal]:
+        """
+        Detect momentum shift signals - catches RSI turning with ADX confirmation.
+        
+        Strategy:
+        - Uses RSI(14) for momentum detection
+        - Bullish: RSI increasing over 3 consecutive candles
+        - Bearish: RSI decreasing over 3 consecutive candles
+        - ADX >= 18 (trend forming, not flat)
+        - Volume >= 1.2x average
+        - Validates trend context (price vs EMA50)
+        - Checks recent 10-candle price action
+        
+        Args:
+            data: DataFrame with indicators
+            timeframe: Timeframe string
+            symbol: Trading symbol
+            
+        Returns:
+            Signal if detected, None otherwise
+        """
+        try:
+            if len(data) < 10:  # Need at least 10 candles for recent price trend check
+                logger.debug(f"[{timeframe}] Insufficient data for momentum shift: {len(data)} candles")
+                return None
+            
+            last = data.iloc[-1]
+            prev = data.iloc[-2]
+            prev2 = data.iloc[-3]
+            
+            # Check for required indicators
+            required_indicators = ['rsi', 'adx', 'volume', 'volume_ma', 'atr', 'ema_50']
+            if not all(ind in last.index for ind in required_indicators):
+                logger.debug(f"[{timeframe}] Missing required indicators for momentum shift detection")
+                return None
+            
+            # Check for NaN values
+            if pd.isna(last['rsi']) or pd.isna(last['adx']) or pd.isna(last['ema_50']):
+                logger.warning(f"[{timeframe}] NaN values in indicators, skipping momentum shift")
+                return None
+            
+            # Get configuration values
+            adx_threshold = self.config.get('signal_rules', {}).get('adx_min_momentum_shift', 18)
+            volume_threshold = self.config.get('signal_rules', {}).get('volume_momentum_shift', 1.2)
+            rsi_momentum_threshold = self.config.get('signal_rules', {}).get('rsi_momentum_threshold', 3.0)
+            sl_multiplier = self.config.get('signal_rules', {}).get('momentum_shift_sl_multiplier', 2.0)
+            tp_multiplier = self.config.get('signal_rules', {}).get('momentum_shift_tp_multiplier', 3.0)
+            
+            # Check ADX >= threshold (trend forming)
+            if last['adx'] < adx_threshold:
+                logger.debug(f"[{timeframe}] ADX too low: {last['adx']:.1f} (need >= {adx_threshold} for momentum shift)")
+                return None
+            
+            # Calculate volume ratio
+            volume_ratio = last['volume'] / last['volume_ma']
+            
+            # Check volume threshold
+            if volume_ratio < volume_threshold:
+                logger.debug(f"[{timeframe}] Volume too low: {volume_ratio:.2f}x (need >= {volume_threshold}x)")
+                return None
+            
+            # Get RSI values
+            rsi_current = last['rsi']
+            rsi_prev = prev['rsi']
+            rsi_prev2 = prev2['rsi']
+            
+            # Calculate RSI change
+            rsi_change = rsi_current - rsi_prev2
+            
+            logger.debug(f"[{timeframe}] Checking momentum shift: RSI {rsi_prev2:.1f} -> {rsi_prev:.1f} -> {rsi_current:.1f}, change: {rsi_change:.1f}")
+            
+            # Bullish Momentum Shift: RSI increasing over 3 candles
+            if rsi_current > rsi_prev and rsi_prev > rsi_prev2 and rsi_change >= rsi_momentum_threshold:
+                # CRITICAL: Check if we're actually in an uptrend
+                if last['close'] < last['ema_50']:
+                    logger.debug(f"[{timeframe}] Bullish RSI turn rejected - price below EMA(50): ${last['close']:.2f} < ${last['ema_50']:.2f} (downtrend)")
+                    return None
+                
+                # Check recent price action (last 10 candles should show upward bias)
+                recent_close = data['close'].iloc[-10]
+                if last['close'] < recent_close:
+                    logger.debug(f"[{timeframe}] Bullish RSI turn rejected - price declining over last 10 candles: ${recent_close:.2f} -> ${last['close']:.2f}")
+                    return None
+                
+                logger.info(f"[{timeframe}] Bullish momentum shift detected - RSI: {rsi_prev2:.1f} -> {rsi_prev:.1f} -> {rsi_current:.1f} (change: +{rsi_change:.1f})")
+                logger.info(f"[{timeframe}] Trend confirmed: Price ${last['close']:.2f} > EMA(50) ${last['ema_50']:.2f}")
+                logger.info(f"[{timeframe}] ADX: {last['adx']:.1f}, Volume: {volume_ratio:.2f}x")
+                
+                entry = last['close']
+                stop_loss = entry - (last['atr'] * sl_multiplier)
+                take_profit = entry + (last['atr'] * tp_multiplier)
+                risk_reward = (take_profit - entry) / (entry - stop_loss)
+                
+                signal = Signal(
+                    timestamp=last['timestamp'],
+                    signal_type="LONG",
+                    timeframe=timeframe,
+                    symbol=symbol,
+                    symbol_context=self._create_symbol_context(symbol),
+                    entry_price=entry,
+                    stop_loss=stop_loss,
+                    take_profit=take_profit,
+                    atr=last['atr'],
+                    risk_reward=risk_reward,
+                    market_bias="bullish",
+                    confidence=4,
+                    indicators={
+                        'rsi': rsi_current,
+                        'rsi_prev': rsi_prev,
+                        'rsi_prev2': rsi_prev2,
+                        'adx': last['adx'],
+                        'ema_50': last['ema_50'],
+                        'volume': last['volume'],
+                        'volume_ma': last['volume_ma']
+                    },
+                    reasoning=f"Momentum Shift: RSI turning up ({rsi_prev2:.1f} -> {rsi_current:.1f}), ADX {last['adx']:.1f}, Volume {volume_ratio:.2f}x",
+                    strategy="Momentum Shift (Bullish)"
+                )
+                
+                return signal
+            
+            # Bearish Momentum Shift: RSI decreasing over 3 candles
+            elif rsi_current < rsi_prev and rsi_prev < rsi_prev2 and abs(rsi_change) >= rsi_momentum_threshold:
+                # CRITICAL: Check if we're actually in a downtrend
+                if last['close'] > last['ema_50']:
+                    logger.debug(f"[{timeframe}] Bearish RSI turn rejected - price above EMA(50): ${last['close']:.2f} > ${last['ema_50']:.2f} (uptrend)")
+                    return None
+                
+                # Check recent price action (last 10 candles should show downward bias)
+                recent_close = data['close'].iloc[-10]
+                if last['close'] > recent_close:
+                    logger.debug(f"[{timeframe}] Bearish RSI turn rejected - price rising over last 10 candles: ${recent_close:.2f} -> ${last['close']:.2f}")
+                    return None
+                
+                logger.info(f"[{timeframe}] Bearish momentum shift detected - RSI: {rsi_prev2:.1f} -> {rsi_prev:.1f} -> {rsi_current:.1f} (change: {rsi_change:.1f})")
+                logger.info(f"[{timeframe}] Trend confirmed: Price ${last['close']:.2f} < EMA(50) ${last['ema_50']:.2f}")
+                logger.info(f"[{timeframe}] ADX: {last['adx']:.1f}, Volume: {volume_ratio:.2f}x")
+                
+                entry = last['close']
+                stop_loss = entry + (last['atr'] * sl_multiplier)
+                take_profit = entry - (last['atr'] * tp_multiplier)
+                risk_reward = (entry - take_profit) / (stop_loss - entry)
+                
+                signal = Signal(
+                    timestamp=last['timestamp'],
+                    signal_type="SHORT",
+                    timeframe=timeframe,
+                    symbol=symbol,
+                    symbol_context=self._create_symbol_context(symbol),
+                    entry_price=entry,
+                    stop_loss=stop_loss,
+                    take_profit=take_profit,
+                    atr=last['atr'],
+                    risk_reward=risk_reward,
+                    market_bias="bearish",
+                    confidence=4,
+                    indicators={
+                        'rsi': rsi_current,
+                        'rsi_prev': rsi_prev,
+                        'rsi_prev2': rsi_prev2,
+                        'adx': last['adx'],
+                        'ema_50': last['ema_50'],
+                        'volume': last['volume'],
+                        'volume_ma': last['volume_ma']
+                    },
+                    reasoning=f"Momentum Shift: RSI turning down ({rsi_prev2:.1f} -> {rsi_current:.1f}), ADX {last['adx']:.1f}, Volume {volume_ratio:.2f}x",
+                    strategy="Momentum Shift (Bearish)"
+                )
+                
+                return signal
+            
+            else:
+                logger.debug(f"[{timeframe}] No momentum shift: RSI change {rsi_change:.1f} (need >= {rsi_momentum_threshold})")
+            
+            return None
+            
+        except KeyError as e:
+            logger.error(f"Missing indicator in momentum shift detection: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Error in momentum shift detection: {e}", exc_info=True)
+            return None
 
     
 
@@ -303,7 +993,37 @@ class SignalDetector:
 
         
 
-        # Check for bullish signal
+        # Priority 1: Check for momentum shift signal (NEW)
+        momentum_signal = self._detect_momentum_shift(data, timeframe, symbol)
+        if momentum_signal and not self._is_duplicate_signal(momentum_signal):
+            self.signal_history.append(momentum_signal)
+            logger.info(f"{momentum_signal.signal_type} signal detected on {timeframe}: {momentum_signal.strategy}")
+            return momentum_signal
+        
+        # Priority 2: Check for trend alignment signal (NEW)
+        trend_alignment_signal = self._detect_trend_alignment(data, timeframe, symbol)
+        if trend_alignment_signal and not self._is_duplicate_signal(trend_alignment_signal):
+            self.signal_history.append(trend_alignment_signal)
+            logger.info(f"{trend_alignment_signal.signal_type} signal detected on {timeframe}: {trend_alignment_signal.strategy}")
+            return trend_alignment_signal
+        
+        # Priority 3: Check for EMA cloud breakout signal (NEW)
+        ema_cloud_signal = self._detect_ema_cloud_breakout(data, timeframe, symbol)
+        if ema_cloud_signal and not self._is_duplicate_signal(ema_cloud_signal):
+            self.signal_history.append(ema_cloud_signal)
+            logger.info(f"{ema_cloud_signal.signal_type} signal detected on {timeframe}: {ema_cloud_signal.strategy}")
+            return ema_cloud_signal
+        
+        # Priority 4: Check for mean reversion signal (NEW)
+        mean_reversion_signal = self._detect_mean_reversion(data, timeframe, symbol)
+        if mean_reversion_signal and not self._is_duplicate_signal(mean_reversion_signal):
+            self.signal_history.append(mean_reversion_signal)
+            logger.info(f"{mean_reversion_signal.signal_type} signal detected on {timeframe}: {mean_reversion_signal.strategy}")
+            return mean_reversion_signal
+
+        
+
+        # Priority 5: Check for bullish confluence signal
 
         bullish_signal = self._check_bullish_confluence(data, timeframe, symbol)
 
@@ -317,7 +1037,7 @@ class SignalDetector:
 
         
 
-        # Check for bearish signal
+        # Priority 6: Check for bearish confluence signal
 
         bearish_signal = self._check_bearish_confluence(data, timeframe, symbol)
 
@@ -331,7 +1051,7 @@ class SignalDetector:
 
         
 
-        # Check for trend-following signal if no crossover signal found
+        # Priority 7: Check for trend-following signal
 
         trend_signal = self._detect_trend_following(data, timeframe, symbol)
 
@@ -1777,3 +2497,114 @@ class SignalDetector:
         except Exception as e:
             logger.error(f"Error in extreme RSI detection: {e}", exc_info=True)
             return None
+    
+    def _is_pin_bar(self, candle: pd.Series) -> bool:
+        """
+        Detect pin bar pattern (long wick, small body).
+        
+        A pin bar has a long wick (at least 2x the body size) with the body
+        in the upper or lower third of the candle range.
+        
+        Args:
+            candle: Candle data (open, high, low, close)
+            
+        Returns:
+            True if pin bar detected, False otherwise
+        """
+        try:
+            body_size = abs(candle['close'] - candle['open'])
+            total_range = candle['high'] - candle['low']
+            
+            if total_range == 0:
+                return False
+            
+            # Calculate wick sizes
+            if candle['close'] > candle['open']:  # Bullish candle
+                upper_wick = candle['high'] - candle['close']
+                lower_wick = candle['open'] - candle['low']
+            else:  # Bearish candle
+                upper_wick = candle['high'] - candle['open']
+                lower_wick = candle['close'] - candle['low']
+            
+            # Pin bar has one wick at least 2x body size
+            has_long_wick = (upper_wick >= body_size * 2) or (lower_wick >= body_size * 2)
+            
+            # Body should be in upper/lower 1/3 of candle
+            body_position = (min(candle['close'], candle['open']) - candle['low']) / total_range
+            in_lower_third = body_position < 0.33
+            in_upper_third = body_position > 0.67
+            
+            return has_long_wick and (in_lower_third or in_upper_third)
+            
+        except Exception as e:
+            logger.error(f"Error detecting pin bar: {e}")
+            return False
+    
+    def _is_doji(self, candle: pd.Series) -> bool:
+        """
+        Detect doji pattern (very small body).
+        
+        A doji has a body size less than 10% of the total candle range,
+        indicating indecision in the market.
+        
+        Args:
+            candle: Candle data (open, high, low, close)
+            
+        Returns:
+            True if doji detected, False otherwise
+        """
+        try:
+            body_size = abs(candle['close'] - candle['open'])
+            total_range = candle['high'] - candle['low']
+            
+            if total_range == 0:
+                return False
+            
+            # Doji has body < 10% of total range
+            body_ratio = body_size / total_range
+            return body_ratio < 0.10
+            
+        except Exception as e:
+            logger.error(f"Error detecting doji: {e}")
+            return False
+    
+    def _is_engulfing(self, current: pd.Series, previous: pd.Series) -> bool:
+        """
+        Detect engulfing candle pattern.
+        
+        Bullish engulfing: Current green candle body completely engulfs previous red candle body
+        Bearish engulfing: Current red candle body completely engulfs previous green candle body
+        
+        Args:
+            current: Current candle data
+            previous: Previous candle data
+            
+        Returns:
+            True if engulfing pattern detected, False otherwise
+        """
+        try:
+            # Current candle body
+            current_body_top = max(current['close'], current['open'])
+            current_body_bottom = min(current['close'], current['open'])
+            current_is_bullish = current['close'] > current['open']
+            
+            # Previous candle body
+            prev_body_top = max(previous['close'], previous['open'])
+            prev_body_bottom = min(previous['close'], previous['open'])
+            prev_is_bullish = previous['close'] > previous['open']
+            
+            # Bullish engulfing: current bullish candle engulfs previous bearish candle
+            if current_is_bullish and not prev_is_bullish:
+                return (current_body_bottom < prev_body_bottom and 
+                       current_body_top > prev_body_top)
+            
+            # Bearish engulfing: current bearish candle engulfs previous bullish candle
+            elif not current_is_bullish and prev_is_bullish:
+                return (current_body_bottom < prev_body_bottom and 
+                       current_body_top > prev_body_top)
+            
+            return False
+            
+        except Exception as e:
+            logger.error(f"Error detecting engulfing pattern: {e}")
+            return False

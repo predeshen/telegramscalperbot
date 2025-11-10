@@ -14,13 +14,22 @@
   },
   "signal_rules": {
     "volume_spike_threshold": 0.8,
+    "volume_momentum_shift": 1.2,
+    "volume_trend_alignment": 0.8,
+    "volume_ema_cloud_breakout": 1.5,
+    "volume_mean_reversion": 1.3,
     "rsi_min": 5,
     "rsi_max": 95,
+    "rsi_momentum_threshold": 3.0,
     "stop_loss_atr_multiplier": 1.5,
     "take_profit_atr_multiplier": 1.0,
+    "momentum_shift_sl_multiplier": 2.0,
+    "momentum_shift_tp_multiplier": 3.0,
+    "adx_min_momentum_shift": 18,
+    "adx_min_trend_alignment": 19,
+    "adx_min_trend": 20,
     "duplicate_time_window_minutes": 5,
     "duplicate_price_threshold_percent": 0.3,
-    "adx_min_trend": 20,
     "enable_extreme_rsi_signals": true
   },
   "smtp": {

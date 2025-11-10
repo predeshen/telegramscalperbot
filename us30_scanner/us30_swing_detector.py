@@ -94,6 +94,14 @@ class US30SwingDetector:
             signal = self._detect_trend_alignment(data, timeframe, symbol)
         
         if not signal:
+            # Try EMA cloud breakout (NEW)
+            signal = self._detect_ema_cloud_breakout(data, timeframe, symbol)
+        
+        if not signal:
+            # Try mean reversion (NEW)
+            signal = self._detect_mean_reversion(data, timeframe, symbol)
+        
+        if not signal:
             # Try trend continuation (secondary)
             signal = self._detect_trend_continuation(data, timeframe)
         
@@ -243,6 +251,255 @@ class US30SwingDetector:
             return None
     
 
+    
+    def _detect_mean_reversion(self, data: pd.DataFrame, timeframe: str, symbol: str = "US30") -> Optional[US30SwingSignal]:
+        """
+        Detect mean reversion signals for US30.
+        
+        Strategy:
+        - Price overextended (> 1.5 ATR from VWAP)
+        - RSI extremes (< 25 oversold or > 75 overbought)
+        - Reversal candle patterns (pin bar, doji, engulfing)
+        - Volume >= 1.3x average
+        - Target VWAP for mean reversion
+        
+        Args:
+            data: DataFrame with indicators
+            timeframe: Timeframe string
+            symbol: Trading symbol
+            
+        Returns:
+            US30SwingSignal if detected, None otherwise
+        """
+        try:
+            if len(data) < 3:
+                return None
+            
+            last = data.iloc[-1]
+            prev = data.iloc[-2]
+            
+            # Check for required indicators
+            required_indicators = ['vwap', 'rsi', 'atr', 'volume', 'volume_ma']
+            if not all(ind in last.index for ind in required_indicators):
+                logger.debug(f"[{timeframe}] Missing required indicators for mean reversion detection")
+                return None
+            
+            # Get configuration values
+            volume_threshold = self.config.get('volume_mean_reversion', 1.3)
+            
+            atr = last['atr']
+            vwap = last['vwap']
+            current_price = last['close']
+            
+            # Check overextension (> 1.5 ATR from VWAP)
+            distance_from_vwap = abs(current_price - vwap)
+            
+            if distance_from_vwap < (atr * 1.5):
+                logger.debug(f"[{timeframe}] Price not overextended: distance {distance_from_vwap:.2f} < {atr * 1.5:.2f} (1.5 ATR)")
+                return None
+            
+            # Check RSI extremes
+            rsi_overbought = last['rsi'] > 75
+            rsi_oversold = last['rsi'] < 25
+            
+            if not (rsi_overbought or rsi_oversold):
+                logger.debug(f"[{timeframe}] RSI not extreme: {last['rsi']:.1f} (need < 25 or > 75)")
+                return None
+            
+            # Calculate volume ratio
+            volume_ratio = last['volume'] / last['volume_ma']
+            
+            # Check volume confirmation
+            if volume_ratio < volume_threshold:
+                logger.debug(f"[{timeframe}] Volume too low: {volume_ratio:.2f}x (need >= {volume_threshold}x)")
+                return None
+            
+            # Detect reversal candles
+            is_pin_bar = self._is_pin_bar(last)
+            is_engulfing = self._is_engulfing(last, prev)
+            is_doji = self._is_doji(last)
+            
+            if not (is_pin_bar or is_engulfing or is_doji):
+                logger.debug(f"[{timeframe}] No reversal pattern detected")
+                return None
+            
+            pattern_name = "pin bar" if is_pin_bar else ("engulfing" if is_engulfing else "doji")
+            
+            # Bullish reversal (price below VWAP, oversold)
+            if current_price < vwap and rsi_oversold:
+                logger.info(f"[{timeframe}] Bullish mean reversion detected - Price ${current_price:.2f} < VWAP ${vwap:.2f}, RSI {last['rsi']:.1f}, {pattern_name} pattern")
+                logger.info(f"[{timeframe}] Overextension: {distance_from_vwap:.2f} ({distance_from_vwap/atr:.1f} ATR), Volume {volume_ratio:.2f}x")
+                
+                entry = last['close']
+                stop_loss = entry - (atr * 1.0)
+                take_profit = vwap  # Target mean (VWAP)
+                
+                signal = self._create_signal(
+                    timestamp=last['timestamp'],
+                    signal_type="LONG",
+                    timeframe=timeframe,
+                    entry_price=entry,
+                    stop_loss=stop_loss,
+                    take_profit=take_profit,
+                    indicators=last,
+                    strategy="Mean Reversion",
+                    symbol=symbol
+                )
+                
+                return signal
+            
+            # Bearish reversal (price above VWAP, overbought)
+            elif current_price > vwap and rsi_overbought:
+                logger.info(f"[{timeframe}] Bearish mean reversion detected - Price ${current_price:.2f} > VWAP ${vwap:.2f}, RSI {last['rsi']:.1f}, {pattern_name} pattern")
+                logger.info(f"[{timeframe}] Overextension: {distance_from_vwap:.2f} ({distance_from_vwap/atr:.1f} ATR), Volume {volume_ratio:.2f}x")
+                
+                entry = last['close']
+                stop_loss = entry + (atr * 1.0)
+                take_profit = vwap  # Target mean (VWAP)
+                
+                signal = self._create_signal(
+                    timestamp=last['timestamp'],
+                    signal_type="SHORT",
+                    timeframe=timeframe,
+                    entry_price=entry,
+                    stop_loss=stop_loss,
+                    take_profit=take_profit,
+                    indicators=last,
+                    strategy="Mean Reversion",
+                    symbol=symbol
+                )
+                
+                return signal
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error in mean reversion detection: {e}", exc_info=True)
+            return None
+    
+    def _detect_ema_cloud_breakout(self, data: pd.DataFrame, timeframe: str, symbol: str = "US30") -> Optional[US30SwingSignal]:
+        """
+        Detect EMA cloud breakout signals for US30.
+        
+        Strategy:
+        - EMA(21) and EMA(50) aligned (bullish: EMA21 > EMA50, bearish: EMA21 < EMA50)
+        - Price vs VWAP (bullish: price > VWAP, bearish: price < VWAP)
+        - RSI in range 25-75 (avoid extremes)
+        - Volume >= 1.5x average (strong breakout)
+        - Range breakout (price breaks recent 10-candle high/low)
+        
+        Args:
+            data: DataFrame with indicators
+            timeframe: Timeframe string
+            symbol: Trading symbol
+            
+        Returns:
+            US30SwingSignal if detected, None otherwise
+        """
+        try:
+            if len(data) < 11:  # Need 10 candles for range + current
+                return None
+            
+            last = data.iloc[-1]
+            prev = data.iloc[-2]
+            
+            # Check for required indicators
+            required_indicators = ['ema_21', 'ema_50', 'vwap', 'rsi', 'volume', 'volume_ma', 'atr']
+            if not all(ind in last.index for ind in required_indicators):
+                logger.debug(f"[{timeframe}] Missing required indicators for EMA cloud breakout detection")
+                return None
+            
+            # Get configuration values
+            volume_threshold = self.config.get('volume_ema_cloud_breakout', 1.5)
+            
+            # Check EMA alignment
+            bullish_alignment = last['ema_21'] > last['ema_50']
+            bearish_alignment = last['ema_21'] < last['ema_50']
+            
+            if not (bullish_alignment or bearish_alignment):
+                logger.debug(f"[{timeframe}] No EMA alignment: EMA21={last['ema_21']:.2f}, EMA50={last['ema_50']:.2f}")
+                return None
+            
+            # Check VWAP position
+            price_above_vwap = last['close'] > last['vwap']
+            price_below_vwap = last['close'] < last['vwap']
+            
+            # Check RSI range (avoid extremes)
+            if last['rsi'] < 25 or last['rsi'] > 75:
+                logger.debug(f"[{timeframe}] RSI extreme: {last['rsi']:.1f} (need 25-75 for breakout)")
+                return None
+            
+            # Calculate volume ratio
+            volume_ratio = last['volume'] / last['volume_ma']
+            
+            # Check volume threshold
+            if volume_ratio < volume_threshold:
+                logger.debug(f"[{timeframe}] Volume too low: {volume_ratio:.2f}x (need >= {volume_threshold}x)")
+                return None
+            
+            # Bullish setup
+            if bullish_alignment and price_above_vwap:
+                # Check for breakout (price breaking above recent 10-candle high)
+                recent_high = data['high'].iloc[-11:-1].max()
+                
+                logger.debug(f"[{timeframe}] Bullish EMA cloud: checking breakout above {recent_high:.2f}, current: {last['close']:.2f}")
+                
+                if last['close'] > recent_high:
+                    logger.info(f"[{timeframe}] Bullish EMA cloud breakout detected - Price {last['close']:.2f} > Recent high {recent_high:.2f}")
+                    logger.info(f"[{timeframe}] EMA21 {last['ema_21']:.2f} > EMA50 {last['ema_50']:.2f}, Price > VWAP {last['vwap']:.2f}, RSI {last['rsi']:.1f}, Volume {volume_ratio:.2f}x")
+                    
+                    entry = last['close']
+                    stop_loss = entry - (last['atr'] * 1.2)
+                    take_profit = entry + (last['atr'] * 1.5)
+                    
+                    signal = self._create_signal(
+                        timestamp=last['timestamp'],
+                        signal_type="LONG",
+                        timeframe=timeframe,
+                        entry_price=entry,
+                        stop_loss=stop_loss,
+                        take_profit=take_profit,
+                        indicators=last,
+                        strategy="EMA Cloud Breakout",
+                        symbol=symbol
+                    )
+                    
+                    return signal
+            
+            # Bearish setup
+            elif bearish_alignment and price_below_vwap:
+                # Check for breakdown (price breaking below recent 10-candle low)
+                recent_low = data['low'].iloc[-11:-1].min()
+                
+                logger.debug(f"[{timeframe}] Bearish EMA cloud: checking breakdown below {recent_low:.2f}, current: {last['close']:.2f}")
+                
+                if last['close'] < recent_low:
+                    logger.info(f"[{timeframe}] Bearish EMA cloud breakdown detected - Price {last['close']:.2f} < Recent low {recent_low:.2f}")
+                    logger.info(f"[{timeframe}] EMA21 {last['ema_21']:.2f} < EMA50 {last['ema_50']:.2f}, Price < VWAP {last['vwap']:.2f}, RSI {last['rsi']:.1f}, Volume {volume_ratio:.2f}x")
+                    
+                    entry = last['close']
+                    stop_loss = entry + (last['atr'] * 1.2)
+                    take_profit = entry - (last['atr'] * 1.5)
+                    
+                    signal = self._create_signal(
+                        timestamp=last['timestamp'],
+                        signal_type="SHORT",
+                        timeframe=timeframe,
+                        entry_price=entry,
+                        stop_loss=stop_loss,
+                        take_profit=take_profit,
+                        indicators=last,
+                        strategy="EMA Cloud Breakout",
+                        symbol=symbol
+                    )
+                    
+                    return signal
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error in EMA cloud breakout detection: {e}", exc_info=True)
+            return None
     
     def _detect_trend_alignment(self, data: pd.DataFrame, timeframe: str, symbol: str = "US30") -> Optional[US30SwingSignal]:
         """
@@ -775,3 +1032,114 @@ class US30SwingDetector:
                 return True
         
         return False
+
+    def _is_pin_bar(self, candle: pd.Series) -> bool:
+        """
+        Detect pin bar pattern (long wick, small body).
+        
+        A pin bar has a long wick (at least 2x the body size) with the body
+        in the upper or lower third of the candle range.
+        
+        Args:
+            candle: Candle data (open, high, low, close)
+            
+        Returns:
+            True if pin bar detected, False otherwise
+        """
+        try:
+            body_size = abs(candle['close'] - candle['open'])
+            total_range = candle['high'] - candle['low']
+            
+            if total_range == 0:
+                return False
+            
+            # Calculate wick sizes
+            if candle['close'] > candle['open']:  # Bullish candle
+                upper_wick = candle['high'] - candle['close']
+                lower_wick = candle['open'] - candle['low']
+            else:  # Bearish candle
+                upper_wick = candle['high'] - candle['open']
+                lower_wick = candle['close'] - candle['low']
+            
+            # Pin bar has one wick at least 2x body size
+            has_long_wick = (upper_wick >= body_size * 2) or (lower_wick >= body_size * 2)
+            
+            # Body should be in upper/lower 1/3 of candle
+            body_position = (min(candle['close'], candle['open']) - candle['low']) / total_range
+            in_lower_third = body_position < 0.33
+            in_upper_third = body_position > 0.67
+            
+            return has_long_wick and (in_lower_third or in_upper_third)
+            
+        except Exception as e:
+            logger.error(f"Error detecting pin bar: {e}")
+            return False
+    
+    def _is_doji(self, candle: pd.Series) -> bool:
+        """
+        Detect doji pattern (very small body).
+        
+        A doji has a body size less than 10% of the total candle range,
+        indicating indecision in the market.
+        
+        Args:
+            candle: Candle data (open, high, low, close)
+            
+        Returns:
+            True if doji detected, False otherwise
+        """
+        try:
+            body_size = abs(candle['close'] - candle['open'])
+            total_range = candle['high'] - candle['low']
+            
+            if total_range == 0:
+                return False
+            
+            # Doji has body < 10% of total range
+            body_ratio = body_size / total_range
+            return body_ratio < 0.10
+            
+        except Exception as e:
+            logger.error(f"Error detecting doji: {e}")
+            return False
+    
+    def _is_engulfing(self, current: pd.Series, previous: pd.Series) -> bool:
+        """
+        Detect engulfing candle pattern.
+        
+        Bullish engulfing: Current green candle body completely engulfs previous red candle body
+        Bearish engulfing: Current red candle body completely engulfs previous green candle body
+        
+        Args:
+            current: Current candle data
+            previous: Previous candle data
+            
+        Returns:
+            True if engulfing pattern detected, False otherwise
+        """
+        try:
+            # Current candle body
+            current_body_top = max(current['close'], current['open'])
+            current_body_bottom = min(current['close'], current['open'])
+            current_is_bullish = current['close'] > current['open']
+            
+            # Previous candle body
+            prev_body_top = max(previous['close'], previous['open'])
+            prev_body_bottom = min(previous['close'], previous['open'])
+            prev_is_bullish = previous['close'] > previous['open']
+            
+            # Bullish engulfing: current bullish candle engulfs previous bearish candle
+            if current_is_bullish and not prev_is_bullish:
+                return (current_body_bottom < prev_body_bottom and 
+                       current_body_top > prev_body_top)
+            
+            # Bearish engulfing: current bearish candle engulfs previous bullish candle
+            elif not current_is_bullish and prev_is_bullish:
+                return (current_body_bottom < prev_body_bottom and 
+                       current_body_top > prev_body_top)
+            
+            return False
+            
+        except Exception as e:
+            logger.error(f"Error detecting engulfing pattern: {e}")
+            return False
