@@ -18,6 +18,8 @@ from src.trend_analyzer import TrendAnalyzer
 
 from src.h4_hvg_detector import GapInfo, H4HVGDetector
 
+from src.sl_tp_calculator import SLTPCalculator
+
 from src.symbol_context import SymbolContext
 
 
@@ -1259,11 +1261,26 @@ class SignalDetector:
 
             atr = last['atr']
 
-            stop_loss = entry_price - (atr * self.stop_loss_atr_multiplier)
+            
+            # Use structure-based SL/TP for realistic targets
 
-            take_profit = entry_price + (atr * self.take_profit_atr_multiplier)
+            stop_loss, take_profit, risk_reward = SLTPCalculator.calculate_structure_based_sltp(
 
-            risk_reward = (take_profit - entry_price) / (entry_price - stop_loss)
+                data=data,
+
+                entry_price=entry_price,
+
+                signal_type="LONG",
+
+                atr=atr,
+
+                lookback=50,
+
+                min_rr=1.5,
+
+                max_rr=5.0
+
+            )
 
             
 
@@ -1465,11 +1482,26 @@ class SignalDetector:
 
             atr = last['atr']
 
-            stop_loss = entry_price + (atr * self.stop_loss_atr_multiplier)
+            
+            # Use structure-based SL/TP for realistic targets
 
-            take_profit = entry_price - (atr * self.take_profit_atr_multiplier)
+            stop_loss, take_profit, risk_reward = SLTPCalculator.calculate_structure_based_sltp(
 
-            risk_reward = (entry_price - take_profit) / (stop_loss - entry_price)
+                data=data,
+
+                entry_price=entry_price,
+
+                signal_type="SHORT",
+
+                atr=atr,
+
+                lookback=50,
+
+                min_rr=1.5,
+
+                max_rr=5.0
+
+            )
 
             
 
