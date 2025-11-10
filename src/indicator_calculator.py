@@ -36,11 +36,11 @@ class IndicatorCalculator:
         if missing_columns:
             return False, f"Missing required columns: {', '.join(missing_columns)}"
         
-        # Check for sufficient rows
-        # We need at least the maximum period for indicators to calculate properly
-        max_period = max(required_periods) if required_periods else 200
+        # Check for sufficient rows - use the max period from the adjusted list
+        # This is more flexible than the old hard requirement
+        max_period = max(required_periods) if required_periods else 50
         
-        # Only require exactly the max period - indicators will handle warmup internally
+        # Require at least the max period for proper indicator calculation
         if len(data) < max_period:
             return False, f"Insufficient data: need at least {max_period} rows, got {len(data)}"
         
@@ -474,22 +474,35 @@ class IndicatorCalculator:
             logger.error("This should NEVER happen in production - check data source!")
             raise ValueError("Cannot calculate indicators on empty DataFrame")
         
-        # Validate data before calculations
+        # Auto-adjust EMA periods based on available data
+        data_length = len(data)
+        original_ema_periods = ema_periods.copy()
+        
+        # Filter out EMA periods that are too large for available data
+        # Keep only EMAs where we have at least the period length
+        adjusted_ema_periods = [p for p in ema_periods if p <= data_length]
+        
+        if len(adjusted_ema_periods) < len(original_ema_periods):
+            removed = [p for p in original_ema_periods if p not in adjusted_ema_periods]
+            logger.warning(f"Insufficient data ({data_length} rows) for EMA periods: {removed}")
+            logger.warning(f"Using adjusted EMA periods: {adjusted_ema_periods}")
+            ema_periods = adjusted_ema_periods
+        
+        # Ensure we have at least some EMAs
+        if not ema_periods:
+            logger.error(f"Cannot calculate any EMAs with only {data_length} rows")
+            raise ValueError(f"Insufficient data: need at least 9 rows for minimum EMA, got {data_length}")
+        
+        # Validate data for remaining indicators
         all_periods = ema_periods + [atr_period, rsi_period, volume_ma_period]
         is_valid, error_msg = IndicatorCalculator.validate_data_for_indicators(data, all_periods)
         if not is_valid:
             max_period = max(all_periods)
             logger.error(f"Data validation failed: {error_msg}")
             logger.error(f"Received {len(data)} rows, max indicator period is {max_period}")
-            
-            # Check if this is a market hours issue (like US30)
-            if len(data) > max_period * 0.8:  # Within 80% of requirement
-                logger.warning("This may be due to limited market hours (e.g., US30 index)")
-                logger.warning("Consider using longer timeframes (4h, 1d) for indices")
-            
             raise ValueError(f"Data validation failed: {error_msg}")
         
-        logger.info(f"Calculating indicators on {len(data)} candles")
+        logger.info(f"Calculating indicators on {len(data)} candles with EMA periods: {ema_periods}")
         
         try:
             result = data.copy()
