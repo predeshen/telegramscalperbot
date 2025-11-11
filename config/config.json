@@ -1,8 +1,8 @@
 {
   "exchange": {
     "name": "hybrid",
-    "symbol": "BTC/USDT",
-    "timeframes": ["1m", "5m", "4h"]
+    "symbol": "BTC/USD",
+    "timeframes": ["1m", "15m", "4h"]
   },
   "data_providers": {
     "alpha_vantage_key": "66IUJDWBSTV9U220",
