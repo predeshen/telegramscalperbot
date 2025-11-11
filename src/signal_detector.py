@@ -1262,25 +1262,13 @@ class SignalDetector:
             atr = last['atr']
 
             
-            # Use structure-based SL/TP for realistic targets
+            # Use improved ATR-based SL/TP (1.0 SL, 2.5 TP for 2.5:1 R:R)
 
-            stop_loss, take_profit, risk_reward = SLTPCalculator.calculate_structure_based_sltp(
+            stop_loss = entry_price - (atr * self.stop_loss_atr_multiplier)
 
-                data=data,
+            take_profit = entry_price + (atr * self.take_profit_atr_multiplier)
 
-                entry_price=entry_price,
-
-                signal_type="LONG",
-
-                atr=atr,
-
-                lookback=50,
-
-                min_rr=1.5,
-
-                max_rr=5.0
-
-            )
+            risk_reward = (take_profit - entry_price) / (entry_price - stop_loss)
 
             
 
@@ -1483,25 +1471,13 @@ class SignalDetector:
             atr = last['atr']
 
             
-            # Use structure-based SL/TP for realistic targets
+            # Use improved ATR-based SL/TP (1.0 SL, 2.5 TP for 2.5:1 R:R)
 
-            stop_loss, take_profit, risk_reward = SLTPCalculator.calculate_structure_based_sltp(
+            stop_loss = entry_price + (atr * self.stop_loss_atr_multiplier)
 
-                data=data,
+            take_profit = entry_price - (atr * self.take_profit_atr_multiplier)
 
-                entry_price=entry_price,
-
-                signal_type="SHORT",
-
-                atr=atr,
-
-                lookback=50,
-
-                min_rr=1.5,
-
-                max_rr=5.0
-
-            )
+            risk_reward = (entry_price - take_profit) / (stop_loss - entry_price)
 
             
 
