@@ -51,12 +51,36 @@ class BTCScalpingScanner:
         # Initialize components
         self.health_monitor = HealthMonitor()
         
-        self.market_client = MarketDataClient(
-            exchange_name=self.config.exchange.name,
-            symbol=self.config.exchange.symbol,
-            timeframes=self.config.exchange.timeframes,
-            buffer_size=500  # Increased from 200 for better indicator calculations
-        )
+        # Use HybridDataClient for hybrid exchange, otherwise use MarketDataClient
+        if self.config.exchange.name == 'hybrid':
+            from src.hybrid_data_client import HybridDataClient
+            
+            # Get data provider keys from config
+            alpha_vantage_key = None
+            twelve_data_key = None
+            preferred_provider = None
+            
+            if hasattr(self.config, 'data_providers'):
+                alpha_vantage_key = getattr(self.config.data_providers, 'alpha_vantage_key', None)
+                twelve_data_key = getattr(self.config.data_providers, 'twelve_data_key', None)
+                preferred_provider = getattr(self.config.data_providers, 'preferred_provider', None)
+            
+            self.market_client = HybridDataClient(
+                symbol=self.config.exchange.symbol,
+                timeframes=self.config.exchange.timeframes,
+                buffer_size=500,
+                alpha_vantage_key=alpha_vantage_key,
+                twelve_data_key=twelve_data_key,
+                preferred_provider=preferred_provider
+            )
+            logger.info("Using HybridDataClient for multi-provider support")
+        else:
+            self.market_client = MarketDataClient(
+                exchange_name=self.config.exchange.name,
+                symbol=self.config.exchange.symbol,
+                timeframes=self.config.exchange.timeframes,
+                buffer_size=500  # Increased from 200 for better indicator calculations
+            )
         
         self.indicator_calculator = IndicatorCalculator()
         

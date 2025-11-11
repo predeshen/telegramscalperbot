@@ -15,6 +15,14 @@ class ExchangeConfig:
 
 
 @dataclass
+class DataProvidersConfig:
+    """Data provider API keys configuration."""
+    alpha_vantage_key: Optional[str] = None
+    twelve_data_key: Optional[str] = None
+    preferred_provider: Optional[str] = None
+
+
+@dataclass
 class IndicatorConfig:
     """Technical indicator parameters."""
     ema_fast: int
@@ -116,6 +124,7 @@ class Config:
     smtp: SMTPConfig
     telegram: TelegramConfig
     logging: LoggingConfig
+    data_providers: Optional[DataProvidersConfig] = None
     h4_hvg: Optional[H4HVGConfig] = None
 
 
@@ -164,6 +173,11 @@ class ConfigLoader:
             
             logging = LoggingConfig(**config_data['logging'])
             
+            # Data providers is optional
+            data_providers = None
+            if 'data_providers' in config_data:
+                data_providers = DataProvidersConfig(**config_data['data_providers'])
+            
             # H4 HVG is optional
             h4_hvg = None
             if 'h4_hvg' in config_data:
@@ -176,6 +190,7 @@ class ConfigLoader:
                 smtp=smtp,
                 telegram=telegram,
                 logging=logging,
+                data_providers=data_providers,
                 h4_hvg=h4_hvg
             )
             
