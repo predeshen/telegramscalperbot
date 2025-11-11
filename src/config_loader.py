@@ -222,7 +222,7 @@ class ConfigLoader:
             ValueError: If any validation fails
         """
         # Validate exchange
-        if config.exchange.name not in ['binance', 'coinbase', 'kraken']:
+        if config.exchange.name not in ['binance', 'coinbase', 'kraken', 'hybrid', 'yfinance']:
             raise ValueError(f"Unsupported exchange: {config.exchange.name}")
         
         if not config.exchange.symbol:
