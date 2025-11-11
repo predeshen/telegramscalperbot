@@ -11,6 +11,9 @@ from src.market_data_client import MarketDataClient
 from src.websocket_streamer import BinanceWebSocketStreamer
 from src.indicator_calculator import IndicatorCalculator
 from src.signal_detector import SignalDetector
+from src.signal_quality_filter import SignalQualityFilter, QualityConfig
+from src.liquidity_filter import LiquidityFilter
+from src.data_validation import DataValidator
 from src.alerter import EmailAlerter, TelegramAlerter, MultiAlerter
 from src.health_monitor import HealthMonitor, setup_logging
 from src.excel_reporter import ExcelReporter
@@ -102,6 +105,26 @@ class BTCScalpingScanner:
             }
             self.signal_detector.configure_h4_hvg(h4_hvg_config, self.config.exchange.symbol)
             logger.info("H4 HVG detection enabled for BTC scalping")
+        
+        # Initialize Signal Quality Filter
+        quality_config = QualityConfig(
+            min_confluence_factors=4,
+            min_confidence_score=4,
+            duplicate_window_seconds=300,  # 5 minutes
+            duplicate_price_tolerance_pct=0.5,
+            significant_price_move_pct=1.0,
+            min_risk_reward=1.5
+        )
+        self.quality_filter = SignalQualityFilter(quality_config)
+        logger.info("Signal Quality Filter initialized")
+        
+        # Initialize Liquidity Filter
+        self.liquidity_filter = LiquidityFilter()
+        logger.info("Liquidity Filter initialized")
+        
+        # Initialize Data Validator
+        self.data_validator = DataValidator(max_consecutive_errors=10)
+        logger.info("Data Validator initialized")
         
         # Initialize news calendar
         self.news_calendar = NewsCalendar()
@@ -494,17 +517,57 @@ class BTCScalpingScanner:
                 logger.debug(f"No valid data after indicator calculation for {timeframe}")
                 return
             
+            # Validate market data
+            is_valid, errors = self.data_validator.validate_market_data(data_with_indicators, self.config.exchange.symbol)
+            if not is_valid:
+                logger.warning(f"Market data validation failed: {', '.join(errors)}")
+                return
+            
             # Detect signals
             signal = self.signal_detector.detect_signals(data_with_indicators, timeframe)
             
             if signal:
-                logger.info(f"🎯 Signal detected: {signal.signal_type} on {timeframe}")
+                logger.info(f"🎯 Preliminary signal detected: {signal.signal_type} on {timeframe} - {signal.strategy}")
+                
+                # Apply Signal Quality Filter
+                filter_result = self.quality_filter.evaluate_signal(signal, data_with_indicators)
+                
+                if not filter_result.passed:
+                    logger.info(f"❌ Signal rejected by quality filter: {filter_result.rejection_reason}")
+                    return
+                
+                # Apply Liquidity Filter
+                asset_symbol = 'BTC'  # For BTC scanner
+                asset_config = self.signal_detector.config.get('asset_specific', {}).get(asset_symbol, {})
+                liquidity_ok, liquidity_reason = self.liquidity_filter.filter_signal(
+                    signal.timestamp, asset_symbol, asset_config, data_with_indicators
+                )
+                
+                if not liquidity_ok:
+                    logger.info(f"❌ Signal rejected by liquidity filter: {liquidity_reason}")
+                    return
+                
+                # Signal passed all filters!
+                logger.info(f"✅ Signal APPROVED: {signal.signal_type} on {timeframe}")
+                logger.info(f"   Confidence: {filter_result.confidence_score}/5, Factors: {len(filter_result.confluence_factors)}/7")
+                
+                # Add signal to quality filter history
+                self.quality_filter.add_signal_to_history(signal)
                 
                 # Record signal
                 self.health_monitor.record_signal(signal.signal_type)
                 
-                # Send alerts
-                alert_success = self.alerter.send_signal_alert(signal)
+                # Create enhanced alert message with quality metrics
+                alert_message = signal.to_alert_message(
+                    confidence_score=filter_result.confidence_score,
+                    confluence_factors=filter_result.confluence_factors
+                )
+                
+                # Send alerts with enhanced message
+                alert_success = self.alerter.send_alert(
+                    f"{signal.signal_type} Signal - {self.config.exchange.symbol}",
+                    alert_message
+                )
                 
                 if alert_success:
                     logger.info("Alert sent successfully")
@@ -512,7 +575,7 @@ class BTCScalpingScanner:
                     logger.error("Failed to send alert")
                 
                 # Update email success rate
-                if hasattr(self.alerter.email_alerter, 'get_success_rate'):
+                if hasattr(self.alerter, 'email_alerter') and hasattr(self.alerter.email_alerter, 'get_success_rate'):
                     rate = self.alerter.email_alerter.get_success_rate()
                     self.health_monitor.set_email_success_rate(rate)
             

@@ -132,6 +132,65 @@ class Signal:
         else:
 
             return self.entry_price - (self.entry_price - self.take_profit) * 0.5
+    
+    def to_alert_message(self, confidence_score: int = None, confluence_factors: List[str] = None) -> str:
+        """
+        Format signal for trader alert with quality metrics
+        
+        Args:
+            confidence_score: Optional confidence score (1-5) from quality filter
+            confluence_factors: Optional list of confluence factors that passed
+            
+        Returns:
+            Formatted alert message string
+        """
+        # Use provided confidence or fall back to signal's confidence
+        conf_score = confidence_score if confidence_score is not None else self.confidence
+        
+        # Create confidence stars
+        stars = '⭐' * conf_score
+        
+        # Get symbol display name
+        symbol_display = self.symbol
+        if self.symbol_context:
+            symbol_display = getattr(self.symbol_context, 'display_symbol', self.symbol_context.symbol if hasattr(self.symbol_context, 'symbol') else self.symbol)
+        
+        # Build message
+        message = f"""
+🔔 {self.signal_type} Signal - {symbol_display} ({self.timeframe})
+Strategy: {self.strategy}
+Confidence: {stars} ({conf_score}/5)
+
+💰 Entry: {self.entry_price:.2f}
+🛑 Stop Loss: {self.stop_loss:.2f}
+🎯 Take Profit: {self.take_profit:.2f}
+📊 Risk/Reward: {self.risk_reward:.2f}
+
+"""
+        
+        # Add confluence factors if provided
+        if confluence_factors:
+            factors_met = len(confluence_factors)
+            message += f"✅ Confluence: {factors_met}/7 factors\n"
+            message += f"Key Factors: {', '.join(confluence_factors[:3])}\n\n"
+        
+        # Add market context
+        if self.indicators:
+            message += "📈 Market Context:\n"
+            if 'rsi' in self.indicators:
+                message += f"RSI: {self.indicators['rsi']:.1f}"
+            if 'adx' in self.indicators:
+                message += f" | ADX: {self.indicators['adx']:.1f}"
+            if 'volume' in self.indicators and 'volume_ma' in self.indicators:
+                vol_ratio = self.indicators['volume'] / self.indicators['volume_ma']
+                message += f"\nVolume: {vol_ratio:.2f}x avg"
+            message += "\n"
+        
+        # Add reasoning
+        if self.reasoning:
+            message += f"\n💡 {self.reasoning}"
+        
+        return message.strip()
 
 
 
@@ -255,6 +314,26 @@ class SignalDetector:
             logger.warning(f"Unknown symbol '{symbol}', defaulting to BTC")
             return SymbolContext.from_symbol("BTC")
     
+    def _get_asset_symbol(self, symbol: str) -> str:
+        """
+        Get asset symbol for configuration lookup
+        
+        Args:
+            symbol: Symbol string (can be legacy format like "BTC/USD" or internal like "BTC")
+            
+        Returns:
+            Asset symbol for config (BTC, XAUUSD, US30)
+        """
+        symbol_map = {
+            "BTC/USD": "BTC",
+            "BTC": "BTC",
+            "XAU/USD": "XAUUSD",
+            "XAUUSD": "XAUUSD",
+            "US30": "US30"
+        }
+        
+        return symbol_map.get(symbol, "BTC")
+    
     def configure_h4_hvg(self, h4_hvg_config: dict, symbol: str) -> None:
         """
         Configure H4 HVG detector with specific settings for a symbol.
@@ -307,26 +386,31 @@ class SignalDetector:
                 logger.warning(f"[{timeframe}] NaN values in indicators, skipping mean reversion")
                 return None
             
-            # Get configuration values
-            volume_threshold = self.config.get('signal_rules', {}).get('volume_mean_reversion', 1.3)
+            # Get asset-specific configuration
+            asset_symbol = self._get_asset_symbol(symbol)
+            asset_config = self.config.get('asset_specific', {}).get(asset_symbol, {})
+            
+            # Get configuration values with asset-specific overrides - Updated to 1.5x
+            volume_threshold = asset_config.get('volume_thresholds', {}).get('mean_reversion',
+                               self.config.get('signal_rules', {}).get('volume_mean_reversion', 1.5))
             
             atr = last['atr']
             vwap = last['vwap']
             current_price = last['close']
             
-            # Check overextension (> 1.5 ATR from VWAP)
+            # Check overextension (> 1.8 ATR from VWAP) - Updated from 1.5
             distance_from_vwap = abs(current_price - vwap)
             
-            if distance_from_vwap < (atr * 1.5):
-                logger.debug(f"[{timeframe}] Price not overextended: distance {distance_from_vwap:.2f} < {atr * 1.5:.2f} (1.5 ATR)")
+            if distance_from_vwap < (atr * 1.8):
+                logger.debug(f"[{timeframe}] Price not overextended: distance {distance_from_vwap:.2f} < {atr * 1.8:.2f} (1.8 ATR)")
                 return None
             
-            # Check RSI extremes
-            rsi_overbought = last['rsi'] > 75
-            rsi_oversold = last['rsi'] < 25
+            # Check RSI extremes - Updated to <20 or >80 (stricter)
+            rsi_overbought = last['rsi'] > 80
+            rsi_oversold = last['rsi'] < 20
             
             if not (rsi_overbought or rsi_oversold):
-                logger.debug(f"[{timeframe}] RSI not extreme: {last['rsi']:.1f} (need < 25 or > 75)")
+                logger.debug(f"[{timeframe}] RSI not extreme: {last['rsi']:.1f} (need < 20 or > 80)")
                 return None
             
             # Calculate volume ratio
@@ -343,7 +427,7 @@ class SignalDetector:
             is_doji = self._is_doji(last)
             
             if not (is_pin_bar or is_engulfing or is_doji):
-                logger.debug(f"[{timeframe}] No reversal pattern detected")
+                logger.info(f"[{timeframe}] Mean reversion rejected - no clear reversal pattern (pin bar, engulfing, or doji)")
                 return None
             
             pattern_name = "pin bar" if is_pin_bar else ("engulfing" if is_engulfing else "doji")
@@ -474,8 +558,13 @@ class SignalDetector:
                 logger.warning(f"[{timeframe}] NaN values in indicators, skipping EMA cloud breakout")
                 return None
             
-            # Get configuration values
-            volume_threshold = self.config.get('signal_rules', {}).get('volume_ema_cloud_breakout', 1.5)
+            # Get asset-specific configuration
+            asset_symbol = self._get_asset_symbol(symbol)
+            asset_config = self.config.get('asset_specific', {}).get(asset_symbol, {})
+            
+            # Get configuration values with asset-specific overrides
+            volume_threshold = asset_config.get('volume_thresholds', {}).get('breakout',
+                               self.config.get('signal_rules', {}).get('volume_ema_cloud_breakout', 1.5))
             
             # Check EMA alignment
             bullish_alignment = last['ema_21'] > last['ema_50']
@@ -489,9 +578,9 @@ class SignalDetector:
             price_above_vwap = last['close'] > last['vwap']
             price_below_vwap = last['close'] < last['vwap']
             
-            # Check RSI range (avoid extremes)
-            if last['rsi'] < 25 or last['rsi'] > 75:
-                logger.debug(f"[{timeframe}] RSI extreme: {last['rsi']:.1f} (need 25-75 for breakout)")
+            # Check RSI range (avoid extremes) - Updated to 30-70
+            if last['rsi'] < 30 or last['rsi'] > 70:
+                logger.debug(f"[{timeframe}] RSI extreme: {last['rsi']:.1f} (need 30-70 for breakout)")
                 return None
             
             # Calculate volume ratio
@@ -504,12 +593,13 @@ class SignalDetector:
             
             # Bullish setup
             if bullish_alignment and price_above_vwap:
-                # Check for breakout (price breaking above recent 10-candle high)
+                # Check for breakout (price breaking above recent 10-candle high by at least 0.2%)
                 recent_high = data['high'].iloc[-11:-1].max()
+                breakout_threshold = recent_high * 1.002  # 0.2% above
                 
-                logger.debug(f"[{timeframe}] Bullish EMA cloud: checking breakout above {recent_high:.2f}, current: {last['close']:.2f}")
+                logger.debug(f"[{timeframe}] Bullish EMA cloud: checking breakout above {breakout_threshold:.2f} (0.2% above {recent_high:.2f}), current: {last['close']:.2f}")
                 
-                if last['close'] > recent_high:
+                if last['close'] > breakout_threshold:
                     logger.info(f"[{timeframe}] Bullish EMA cloud breakout detected - Price {last['close']:.2f} > Recent high {recent_high:.2f}")
                     logger.info(f"[{timeframe}] EMA21 {last['ema_21']:.2f} > EMA50 {last['ema_50']:.2f}, Price > VWAP {last['vwap']:.2f}, RSI {last['rsi']:.1f}, Volume {volume_ratio:.2f}x")
                     
@@ -547,12 +637,13 @@ class SignalDetector:
             
             # Bearish setup
             elif bearish_alignment and price_below_vwap:
-                # Check for breakdown (price breaking below recent 10-candle low)
+                # Check for breakdown (price breaking below recent 10-candle low by at least 0.2%)
                 recent_low = data['low'].iloc[-11:-1].min()
+                breakdown_threshold = recent_low * 0.998  # 0.2% below
                 
-                logger.debug(f"[{timeframe}] Bearish EMA cloud: checking breakdown below {recent_low:.2f}, current: {last['close']:.2f}")
+                logger.debug(f"[{timeframe}] Bearish EMA cloud: checking breakdown below {breakdown_threshold:.2f} (0.2% below {recent_low:.2f}), current: {last['close']:.2f}")
                 
-                if last['close'] < recent_low:
+                if last['close'] < breakdown_threshold:
                     logger.info(f"[{timeframe}] Bearish EMA cloud breakdown detected - Price {last['close']:.2f} < Recent low {recent_low:.2f}")
                     logger.info(f"[{timeframe}] EMA21 {last['ema_21']:.2f} < EMA50 {last['ema_50']:.2f}, Price < VWAP {last['vwap']:.2f}, RSI {last['rsi']:.1f}, Volume {volume_ratio:.2f}x")
                     
@@ -635,13 +726,19 @@ class SignalDetector:
                 logger.warning(f"[{timeframe}] NaN values in EMA indicators, skipping trend alignment")
                 return None
             
-            # Get configuration values
-            adx_threshold = self.config.get('signal_rules', {}).get('adx_min_trend_alignment', 19)
-            volume_threshold = self.config.get('signal_rules', {}).get('volume_trend_alignment', 0.8)
+            # Get asset-specific configuration
+            asset_symbol = self._get_asset_symbol(symbol)
+            asset_config = self.config.get('asset_specific', {}).get(asset_symbol, {})
+            
+            # Get configuration values with asset-specific overrides
+            adx_threshold = asset_config.get('adx_threshold',
+                            self.config.get('signal_rules', {}).get('adx_min_trend_alignment', 19))
+            volume_threshold = asset_config.get('volume_thresholds', {}).get('trend_alignment',
+                               self.config.get('signal_rules', {}).get('volume_trend_alignment', 0.8))
             
             # Check ADX >= threshold (strong trend)
             if last['adx'] < adx_threshold:
-                logger.debug(f"[{timeframe}] ADX too low: {last['adx']:.1f} (need >= {adx_threshold} for trend alignment)")
+                logger.info(f"[{timeframe}] Trend alignment rejected - ADX too low: {last['adx']:.1f} < {adx_threshold} (asset: {asset_symbol})")
                 return None
             
             # Calculate volume ratio
@@ -818,10 +915,16 @@ class SignalDetector:
                 logger.warning(f"[{timeframe}] NaN values in indicators, skipping momentum shift")
                 return None
             
-            # Get configuration values
+            # Get asset-specific configuration
+            asset_symbol = self._get_asset_symbol(symbol)
+            asset_config = self.config.get('asset_specific', {}).get(asset_symbol, {})
+            
+            # Get configuration values with asset-specific overrides
             adx_threshold = self.config.get('signal_rules', {}).get('adx_min_momentum_shift', 18)
-            volume_threshold = self.config.get('signal_rules', {}).get('volume_momentum_shift', 1.2)
-            rsi_momentum_threshold = self.config.get('signal_rules', {}).get('rsi_momentum_threshold', 3.0)
+            volume_threshold = asset_config.get('volume_thresholds', {}).get('momentum_shift', 
+                                self.config.get('signal_rules', {}).get('volume_momentum_shift', 1.2))
+            rsi_momentum_threshold = asset_config.get('rsi_momentum_threshold',
+                                      self.config.get('signal_rules', {}).get('rsi_momentum_threshold', 3.0))
             sl_multiplier = self.config.get('signal_rules', {}).get('momentum_shift_sl_multiplier', 2.0)
             tp_multiplier = self.config.get('signal_rules', {}).get('momentum_shift_tp_multiplier', 3.0)
             

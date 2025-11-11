@@ -28,21 +28,21 @@ class GapInfo:
 class H4HVGDetector:
     """Detects High Volume Gap patterns on 4-hour timeframes."""
     
-    # Market-specific configurations
+    # Market-specific configurations - Updated with stricter requirements
     MARKET_CONFIGS = {
         'BTC': {
-            'min_gap_percent': 0.15,
-            'volume_spike_threshold': 1.5,
+            'min_gap_percent': 0.30,  # Updated from 0.15 to 0.30
+            'volume_spike_threshold': 2.0,  # Updated from 1.5 to 2.0
             'atr_multiplier_sl': 1.5
         },
         'XAU': {
-            'min_gap_percent': 0.10,
-            'volume_spike_threshold': 1.3,
+            'min_gap_percent': 0.30,  # Updated from 0.10 to 0.30
+            'volume_spike_threshold': 2.0,  # Updated from 1.3 to 2.0
             'atr_multiplier_sl': 1.2
         },
         'US30': {
-            'min_gap_percent': 0.08,
-            'volume_spike_threshold': 1.4,
+            'min_gap_percent': 0.30,  # Updated from 0.08 to 0.30
+            'volume_spike_threshold': 2.0,  # Updated from 1.4 to 2.0
             'atr_multiplier_sl': 1.3
         }
     }
@@ -141,10 +141,13 @@ class H4HVGDetector:
             
             # Check if gap meets minimum size requirement
             if gap_percent < self.min_gap_percent:
+                logger.debug(f"Gap too small: {gap_percent:.2f}% < {self.min_gap_percent}%")
                 return None
             
             # Validate volume spike
             if not self._validate_volume_spike(current_candle):
+                volume_ratio = current_candle['volume'] / current_candle['volume_ma'] if current_candle['volume_ma'] > 0 else 0
+                logger.info(f"H4 HVG rejected - insufficient volume: {volume_ratio:.2f}x < {self.volume_spike_threshold}x")
                 return None
             
             # Determine gap direction and levels
@@ -239,14 +242,27 @@ class H4HVGDetector:
                         # EMA confluence required but not met
                         return False, confluence_factors, confidence_score
             
-            # Factor 2: RSI range validation
+            # Factor 2: RSI range validation and momentum confirmation
             rsi = last_candle.get('rsi')
             if rsi is not None and not pd.isna(rsi):
                 if self.rsi_min <= rsi <= self.rsi_max:
                     confluence_factors.append(f"RSI in healthy range ({rsi:.1f})")
                     confidence_score += 1
+                    
+                    # Additional momentum confirmation when approaching gap
+                    if len(data) >= 2:
+                        prev_rsi = data.iloc[-2].get('rsi')
+                        if prev_rsi is not None and not pd.isna(prev_rsi):
+                            # Check RSI direction matches gap direction
+                            if gap_info.gap_direction == "up" and rsi > prev_rsi:
+                                confluence_factors.append("RSI momentum confirming (rising)")
+                                confidence_score += 1
+                            elif gap_info.gap_direction == "down" and rsi < prev_rsi:
+                                confluence_factors.append("RSI momentum confirming (falling)")
+                                confidence_score += 1
                 else:
                     # RSI outside acceptable range
+                    logger.info(f"H4 HVG rejected - RSI {rsi:.1f} outside range {self.rsi_min}-{self.rsi_max}")
                     return False, confluence_factors, confidence_score
             
             # Factor 3: Gap recency

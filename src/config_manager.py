@@ -257,6 +257,44 @@ class ConfigurationManager:
         logger.warning(f"No configuration found for {symbol} {mode}")
         return None
     
+    def get_asset_config(self, symbol: str, config_dict: Dict) -> Dict[str, Any]:
+        """
+        Get asset-specific configuration with fallback to defaults
+        
+        Args:
+            symbol: Asset symbol (BTC, XAUUSD, US30)
+            config_dict: Full configuration dictionary
+            
+        Returns:
+            Asset-specific configuration dictionary
+        """
+        # Get asset-specific config if available
+        asset_specific = config_dict.get('asset_specific', {})
+        
+        if symbol in asset_specific:
+            logger.debug(f"Using asset-specific config for {symbol}")
+            return asset_specific[symbol]
+        
+        # Fallback to defaults
+        logger.debug(f"Using default config for {symbol}")
+        return {
+            'min_confluence_factors': 4,
+            'min_confidence_score': 4,
+            'adx_threshold': 20,
+            'volume_thresholds': {
+                'momentum_shift': 1.2,
+                'trend_alignment': 0.8,
+                'breakout': 1.5,
+                'mean_reversion': 1.5
+            },
+            'rsi_momentum_threshold': 3.0,
+            'trading_hours': None,
+            'duplicate_window_minutes': {
+                'scalp': 5,
+                'swing': 60
+            }
+        }
+    
     def _parse_config(self, config_dict: Dict) -> UnifiedConfig:
         """
         Parse configuration dictionary into UnifiedConfig
