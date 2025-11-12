@@ -302,6 +302,13 @@ Time: {time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime())}
         else:
             message_header = f"{signal_emoji} *{symbol} {signal.signal_type} SIGNAL*"
         
+        # Check for hold period information (US30 Momentum strategy)
+        hold_type = None
+        hold_days = None
+        if signal.strategy_metadata:
+            hold_type = signal.strategy_metadata.get('hold_type')
+            hold_days = signal.strategy_metadata.get('hold_days')
+        
         message = f"""
 {message_header}
 
@@ -315,6 +322,12 @@ Breakeven: ${breakeven:,.2f} (move SL here at 50%)
 R:R: 1:{signal.risk_reward:.2f} | TF: {signal.timeframe}
 Market: {signal.market_bias.upper()} | Confidence: {signal.confidence}/5
 ATR: ${signal.atr:,.2f}"""
+
+        # Add hold period for multi-day trades
+        if hold_type and hold_days:
+            hold_emoji = "⏰" if hold_days >= 3 else "📅"
+            message += f"""
+{hold_emoji} *HOLD: {hold_type}* ({hold_days} days)"""
 
         # Add H4 HVG specific information
         if is_h4_hvg and gap_info:

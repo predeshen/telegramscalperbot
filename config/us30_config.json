@@ -1,23 +1,36 @@
 {
-  "exchange": {
-    "name": "kraken",
-    "symbol": "US30/USD",
-    "timeframes": ["1m", "5m", "15m"]
-  },
+  "symbol": "^DJI",
+  "timeframes": ["1m", "5m", "15m"],
+  "polling_interval_seconds": 30,
+  
   "indicators": {
     "ema_fast": 9,
     "ema_slow": 21,
     "ema_trend": 50,
     "atr_period": 14,
-    "rsi_period": 6,
+    "rsi_period": 14,
     "volume_ma_period": 20
   },
+  
+  "us30_strategy": {
+    "min_fvg_percent": 0.05,
+    "fvg_lookback": 20,
+    "swing_lookback": 5,
+    "min_break_percent": 0.1,
+    "min_adx": 25,
+    "min_volume_ratio": 1.2,
+    "min_candle_body_percent": 60,
+    "initial_tp_atr": 2.5,
+    "stop_loss_atr": 1.5,
+    "trail_after_atr": 1.5
+  },
+  
   "signal_rules": {
     "volume_spike_threshold": 1.2,
     "rsi_min": 25,
     "rsi_max": 75,
     "stop_loss_atr_multiplier": 1.5,
-    "take_profit_atr_multiplier": 1.0,
+    "take_profit_atr_multiplier": 2.5,
     "duplicate_time_window_minutes": 5,
     "duplicate_price_threshold_percent": 0.3
   },
@@ -37,14 +50,23 @@
   },
   "logging": {
     "level": "INFO",
-    "file": "logs/us30_scanner.log",
+    "file": "logs/us30_momentum_scanner.log",
     "rotation": "daily",
     "retention_days": 7
   },
   "excel_reporting": {
     "enabled": true,
-    "excel_file_path": "logs/us30_scalp_scans.xlsx",
+    "excel_file_path": "logs/us30_momentum_scans.xlsx",
     "report_interval_seconds": 3600,
-    "initial_report_delay_seconds": 300
+    "initial_report_delay_seconds": 300,
+    "smtp": {
+      "server": "mail.hashub.co.za",
+      "port": 465,
+      "user": "alerts@hashub.co.za",
+      "password": "Password@2025#!",
+      "from_email": "alerts@hashub.co.za",
+      "to_email": "predeshen@gmail.com",
+      "use_ssl": true
+    }
   }
 }
