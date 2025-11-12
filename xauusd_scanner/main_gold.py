@@ -373,8 +373,20 @@ def main():
             
             # Check for trade updates
             try:
-                current_price = candle_data[config['exchange']['timeframes'][0]].iloc[-1]['close']
-                trade_tracker.update_trades(current_price)
+                df = candle_data[config['exchange']['timeframes'][0]]
+                if not df.empty:
+                    last_row = df.iloc[-1]
+                    current_price = last_row['close']
+                    
+                    # Prepare indicators for momentum reversal detection
+                    indicators = {
+                        'rsi': last_row.get('rsi', 50),
+                        'prev_rsi': df.iloc[-2].get('rsi', 50) if len(df) > 1 else 50,
+                        'adx': last_row.get('adx', 0),
+                        'volume_ratio': last_row['volume'] / last_row['volume_ma'] if last_row.get('volume_ma', 0) > 0 else 0
+                    }
+                    
+                    trade_tracker.update_trades(current_price, indicators)
             
             except Exception as e:
                 logger.error(f"Error checking trade updates: {e}")

@@ -108,7 +108,7 @@ class TradeTracker:
             # Check for momentum reversal (EXIT signal)
             if indicators and not trade.momentum_reversal_notified:
                 if self._check_momentum_reversal(signal, current_price, trade, indicators):
-                    self._send_momentum_reversal_alert(signal, current_price, indicators)
+                    self._send_momentum_reversal_alert(signal, current_price, indicators, trade)
                     trade.momentum_reversal_notified = True
             
             # Check for management updates
@@ -164,10 +164,11 @@ class TradeTracker:
         Check if momentum is reversing - signal to EXIT the trade.
         
         Criteria for EXIT alert:
-        1. Trade is in profit (past breakeven)
-        2. RSI showing reversal (overbought for LONG, oversold for SHORT)
-        3. RSI divergence (price higher but RSI lower for LONG, vice versa for SHORT)
-        4. Volume declining significantly (< 0.8x average)
+        1. Trade was in significant profit (reached 70%+ to target)
+        2. Now giving back gains (dropped 50%+ from highest/lowest)
+        3. RSI showing reversal (overbought for LONG, oversold for SHORT)
+        4. RSI divergence (price higher but RSI lower for LONG, vice versa for SHORT)
+        5. Volume declining significantly (< 0.8x average)
         
         Args:
             signal: Original signal
@@ -178,14 +179,6 @@ class TradeTracker:
         Returns:
             True if momentum reversal detected
         """
-        # Only check if trade is in profit
-        if signal.signal_type == "LONG":
-            if current_price <= signal.entry_price:
-                return False
-        else:
-            if current_price >= signal.entry_price:
-                return False
-        
         rsi = indicators.get('rsi', 50)
         prev_rsi = indicators.get('prev_rsi', 50)
         volume_ratio = indicators.get('volume_ratio', 1.0)
@@ -193,61 +186,100 @@ class TradeTracker:
         reversal_detected = False
         
         if signal.signal_type == "LONG":
-            # Check for bearish reversal signals
-            if rsi > 70:  # Overbought
+            # Check if trade reached significant profit
+            profit_from_entry = trade.highest_price - signal.entry_price
+            target_distance = signal.take_profit - signal.entry_price
+            reached_pct = (profit_from_entry / target_distance) if target_distance > 0 else 0
+            
+            # Check if giving back gains
+            drawdown_from_high = trade.highest_price - current_price
+            giving_back_pct = (drawdown_from_high / profit_from_entry) if profit_from_entry > 0 else 0
+            
+            # CRITICAL: If trade reached 70%+ to target and now giving back 50%+ of gains
+            if reached_pct >= 0.7 and giving_back_pct >= 0.5:
                 reversal_detected = True
-            elif rsi < prev_rsi and current_price > trade.highest_price * 0.99:  # RSI falling while price flat/up
+                logger.warning(f"Momentum reversal: Reached {reached_pct*100:.0f}% to target, giving back {giving_back_pct*100:.0f}% of gains")
+            
+            # Check for bearish reversal signals (even if back in loss)
+            elif rsi > 70:  # Overbought
                 reversal_detected = True
+            elif rsi < prev_rsi - 5 and current_price > trade.highest_price * 0.95:  # RSI falling sharply
+                reversal_detected = True
+                
         else:  # SHORT
-            # Check for bullish reversal signals
-            if rsi < 30:  # Oversold
+            # Check if trade reached significant profit
+            profit_from_entry = signal.entry_price - trade.lowest_price
+            target_distance = signal.entry_price - signal.take_profit
+            reached_pct = (profit_from_entry / target_distance) if target_distance > 0 else 0
+            
+            # Check if giving back gains
+            drawdown_from_low = current_price - trade.lowest_price
+            giving_back_pct = (drawdown_from_low / profit_from_entry) if profit_from_entry > 0 else 0
+            
+            # CRITICAL: If trade reached 70%+ to target and now giving back 50%+ of gains
+            if reached_pct >= 0.7 and giving_back_pct >= 0.5:
                 reversal_detected = True
-            elif rsi > prev_rsi and current_price < trade.lowest_price * 1.01:  # RSI rising while price flat/down
+                logger.warning(f"Momentum reversal: Reached {reached_pct*100:.0f}% to target, giving back {giving_back_pct*100:.0f}% of gains")
+            
+            # Check for bullish reversal signals (even if back in loss)
+            elif rsi < 30:  # Oversold
+                reversal_detected = True
+            elif rsi > prev_rsi + 5 and current_price < trade.lowest_price * 1.05:  # RSI rising sharply
                 reversal_detected = True
         
         # Volume declining is a warning sign
-        if volume_ratio < 0.8:
+        if volume_ratio < 0.8 and reached_pct >= 0.5:
             reversal_detected = True
         
         return reversal_detected
     
-    def _send_momentum_reversal_alert(self, signal: Signal, current_price: float, indicators: Dict) -> None:
+    def _send_momentum_reversal_alert(self, signal: Signal, current_price: float, indicators: Dict, trade: TradeStatus) -> None:
         """Send EXIT NOW alert when momentum reverses."""
         rsi = indicators.get('rsi', 0)
         volume_ratio = indicators.get('volume_ratio', 0)
         
-        # Calculate current profit
+        # Calculate current profit/loss
         if signal.signal_type == "LONG":
             profit_pct = ((current_price - signal.entry_price) / signal.entry_price) * 100
+            best_profit = ((trade.highest_price - signal.entry_price) / signal.entry_price) * 100
+            giving_back = best_profit - profit_pct
         else:
             profit_pct = ((signal.entry_price - current_price) / signal.entry_price) * 100
+            best_profit = ((signal.entry_price - trade.lowest_price) / signal.entry_price) * 100
+            giving_back = best_profit - profit_pct
+        
+        status_emoji = "💰" if profit_pct > 0 else "⚠️"
         
         message = f"""
-🚨 *EXIT SIGNAL - MOMENTUM REVERSAL DETECTED!*
+🚨 *EXIT SIGNAL - MOMENTUM REVERSAL!*
 
 {signal.signal_type} from ${signal.entry_price:,.2f}
 Current Price: ${current_price:,.2f}
-Current Profit: {profit_pct:+.2f}%
+Current P&L: {profit_pct:+.2f}%
 
-*⚠️ REVERSAL SIGNALS:*
+*📊 TRADE ANALYSIS:*
+{status_emoji} Best Profit: +{best_profit:.2f}%
+🔴 Giving Back: {giving_back:.2f}%
 {'🔴 RSI Overbought: ' + f'{rsi:.1f}' if signal.signal_type == 'LONG' and rsi > 70 else ''}
 {'🔴 RSI Oversold: ' + f'{rsi:.1f}' if signal.signal_type == 'SHORT' and rsi < 30 else ''}
-🔴 Volume Declining: {volume_ratio:.2f}x (momentum fading)
-🔴 Price action showing exhaustion
+🔴 Volume: {volume_ratio:.2f}x (momentum fading)
 
-*📉 RECOMMENDED ACTION:*
-🚪 EXIT NOW at market price
-💰 Lock in your {profit_pct:+.2f}% profit
-⚠️ Momentum is reversing - don't give back gains!
+*🚪 RECOMMENDED ACTION:*
+EXIT NOW at market price ${current_price:,.2f}
 
-*Why exit now?*
-The indicators that got you into this trade are now showing reversal. The smart move is to take profit and wait for the next high-probability setup.
+*⚠️ WHY EXIT:*
+• Trade reached +{best_profit:.1f}% profit
+• Now giving back {giving_back:.1f}% of gains
+• Momentum has reversed
+• Don't let a winner turn into a loser!
+
+The smart move is to exit now and preserve capital for the next setup.
 
 ⏰ {datetime.now().strftime('%H:%M:%S UTC')}
 """
         
         self.alerter.send_message(message)
-        logger.info(f"Sent momentum reversal EXIT alert for {signal.signal_type} trade at ${current_price:,.2f} ({profit_pct:+.2f}%)")
+        logger.info(f"Sent momentum reversal EXIT alert for {signal.signal_type} trade at ${current_price:,.2f} (Current: {profit_pct:+.2f}%, Best: +{best_profit:.2f}%)")
     
     def _should_extend_tp(self, signal: Signal, current_price: float, trade: TradeStatus, indicators: Dict) -> bool:
         """
@@ -383,7 +415,10 @@ This locks in a risk-free trade. If price reverses, you exit at breakeven. If it
 """
         
         self.alerter.send_message(message)
-        logger.info(f"Sent breakeven update for {signal.signal_type} trade")
+        
+        # Update the signal's stop-loss to breakeven for tracking
+        signal.stop_loss = signal.entry_price
+        logger.info(f"Sent breakeven update for {signal.signal_type} trade - stop moved to ${signal.entry_price:,.2f}")
     
     def _send_stop_warning(self, signal: Signal, current_price: float) -> None:
         """Send warning that stop-loss is approaching."""
@@ -441,6 +476,10 @@ Price is moving against your position. Prepare for potential stop-out.
         hold_time = datetime.now() - trade.entry_time
         minutes = int(hold_time.total_seconds() / 60)
         
+        # Calculate R:R achieved (handle breakeven case where SL = entry)
+        risk = abs(signal.entry_price - signal.stop_loss)
+        rr_achieved = abs(pnl_points / risk) if risk > 0 else 0.0
+        
         message = f"""
 {emoji} *TRADE CLOSED: {status}*
 
@@ -450,7 +489,7 @@ Exit Price: ${current_price:,.2f}
 *📊 RESULTS:*
 P&L: ${pnl_points:,.2f} ({pnl_percent:+.2f}%)
 Hold Time: {minutes} minutes
-R:R Achieved: {abs(pnl_points / (signal.entry_price - signal.stop_loss)):.2f}
+R:R Achieved: {rr_achieved:.2f}
 
 *💡 NEXT STEPS:*
 {"✅ Great trade! Wait for next setup." if reason == "TARGET" else "✅ Stop protected you. Wait for next setup."}
