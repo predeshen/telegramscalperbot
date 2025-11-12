@@ -1065,6 +1065,39 @@ class SignalDetector:
 
     
 
+    def _is_signal_stale(self, signal: Signal, max_age_minutes: int = 30) -> bool:
+        """
+        Check if a signal is too old to be actionable.
+        
+        This prevents sending stale signals after scanner restarts.
+        
+        Args:
+            signal: Signal to check
+            max_age_minutes: Maximum age in minutes (default: 30)
+            
+        Returns:
+            True if signal is stale, False if fresh
+        """
+        try:
+            now = datetime.now()
+            signal_age = now - signal.timestamp
+            age_minutes = signal_age.total_seconds() / 60
+            
+            if age_minutes > max_age_minutes:
+                logger.warning(
+                    f"Signal is stale: {age_minutes:.1f} minutes old (max: {max_age_minutes}). "
+                    f"Signal: {signal.signal_type} {signal.symbol} at ${signal.entry_price:.2f}. "
+                    f"Skipping to prevent trading on old setups."
+                )
+                return True
+            
+            return False
+            
+        except Exception as e:
+            logger.error(f"Error checking signal age: {e}")
+            # If we can't determine age, assume it's fresh to be safe
+            return False
+    
     def detect_signals(self, data: pd.DataFrame, timeframe: str, symbol: str = "BTC/USD") -> Optional[Signal]:
 
         """
@@ -1103,28 +1136,28 @@ class SignalDetector:
 
         # Priority 1: Check for momentum shift signal (NEW)
         momentum_signal = self._detect_momentum_shift(data, timeframe, symbol)
-        if momentum_signal and not self._is_duplicate_signal(momentum_signal):
+        if momentum_signal and not self._is_duplicate_signal(momentum_signal) and not self._is_signal_stale(momentum_signal):
             self.signal_history.append(momentum_signal)
             logger.info(f"{momentum_signal.signal_type} signal detected on {timeframe}: {momentum_signal.strategy}")
             return momentum_signal
         
         # Priority 2: Check for trend alignment signal (NEW)
         trend_alignment_signal = self._detect_trend_alignment(data, timeframe, symbol)
-        if trend_alignment_signal and not self._is_duplicate_signal(trend_alignment_signal):
+        if trend_alignment_signal and not self._is_duplicate_signal(trend_alignment_signal) and not self._is_signal_stale(trend_alignment_signal):
             self.signal_history.append(trend_alignment_signal)
             logger.info(f"{trend_alignment_signal.signal_type} signal detected on {timeframe}: {trend_alignment_signal.strategy}")
             return trend_alignment_signal
         
         # Priority 3: Check for EMA cloud breakout signal (NEW)
         ema_cloud_signal = self._detect_ema_cloud_breakout(data, timeframe, symbol)
-        if ema_cloud_signal and not self._is_duplicate_signal(ema_cloud_signal):
+        if ema_cloud_signal and not self._is_duplicate_signal(ema_cloud_signal) and not self._is_signal_stale(ema_cloud_signal):
             self.signal_history.append(ema_cloud_signal)
             logger.info(f"{ema_cloud_signal.signal_type} signal detected on {timeframe}: {ema_cloud_signal.strategy}")
             return ema_cloud_signal
         
         # Priority 4: Check for mean reversion signal (NEW)
         mean_reversion_signal = self._detect_mean_reversion(data, timeframe, symbol)
-        if mean_reversion_signal and not self._is_duplicate_signal(mean_reversion_signal):
+        if mean_reversion_signal and not self._is_duplicate_signal(mean_reversion_signal) and not self._is_signal_stale(mean_reversion_signal):
             self.signal_history.append(mean_reversion_signal)
             logger.info(f"{mean_reversion_signal.signal_type} signal detected on {timeframe}: {mean_reversion_signal.strategy}")
             return mean_reversion_signal
@@ -1135,7 +1168,7 @@ class SignalDetector:
 
         bullish_signal = self._check_bullish_confluence(data, timeframe, symbol)
 
-        if bullish_signal and not self._is_duplicate_signal(bullish_signal):
+        if bullish_signal and not self._is_duplicate_signal(bullish_signal) and not self._is_signal_stale(bullish_signal):
 
             self.signal_history.append(bullish_signal)
 
@@ -1149,7 +1182,7 @@ class SignalDetector:
 
         bearish_signal = self._check_bearish_confluence(data, timeframe, symbol)
 
-        if bearish_signal and not self._is_duplicate_signal(bearish_signal):
+        if bearish_signal and not self._is_duplicate_signal(bearish_signal) and not self._is_signal_stale(bearish_signal):
 
             self.signal_history.append(bearish_signal)
 
@@ -1163,7 +1196,7 @@ class SignalDetector:
 
         trend_signal = self._detect_trend_following(data, timeframe, symbol)
 
-        if trend_signal and not self._is_duplicate_signal(trend_signal):
+        if trend_signal and not self._is_duplicate_signal(trend_signal) and not self._is_signal_stale(trend_signal):
 
             self.signal_history.append(trend_signal)
 
@@ -1176,7 +1209,7 @@ class SignalDetector:
         # Check for extreme RSI reversal signals (like the BTC drop)
         if self.config.get('signal_rules', {}).get('enable_extreme_rsi_signals', False):
             extreme_rsi_signal = self._detect_extreme_rsi_reversal(data, timeframe, symbol)
-            if extreme_rsi_signal and not self._is_duplicate_signal(extreme_rsi_signal):
+            if extreme_rsi_signal and not self._is_duplicate_signal(extreme_rsi_signal) and not self._is_signal_stale(extreme_rsi_signal):
                 self.signal_history.append(extreme_rsi_signal)
                 logger.info(f"{extreme_rsi_signal.signal_type} extreme RSI signal detected on {timeframe}: {extreme_rsi_signal.entry_price}")
                 return extreme_rsi_signal
@@ -1184,7 +1217,7 @@ class SignalDetector:
         # Check for H4 HVG signal on 4-hour timeframe
         if timeframe == '4h':
             hvg_signal = self._detect_h4_hvg(data, timeframe, symbol)
-            if hvg_signal and not self._is_duplicate_signal(hvg_signal):
+            if hvg_signal and not self._is_duplicate_signal(hvg_signal) and not self._is_signal_stale(hvg_signal):
                 self.signal_history.append(hvg_signal)
                 logger.info(f"H4 HVG {hvg_signal.signal_type} signal detected on {timeframe}: {hvg_signal.entry_price}")
                 return hvg_signal
