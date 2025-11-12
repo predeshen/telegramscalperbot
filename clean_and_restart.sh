@@ -30,6 +30,17 @@ rm -f logs/*.log*
 rm -f logs/*.xlsx
 echo "✓ Deleted all log files and Excel reports"
 
+echo "Recreating log files with correct permissions..."
+touch logs/scanner.log
+touch logs/scanner_swing.log
+touch logs/gold_scanner.log
+touch logs/gold_swing_scanner.log
+touch logs/us30_scalp_scanner.log
+touch logs/us30_swing_scanner.log
+touch logs/us30_momentum_scanner.log
+chmod 644 logs/*.log
+echo "✓ Log files recreated"
+
 echo
 echo "Starting all scanners with fresh state..."
 sudo systemctl start btc-scalp-scanner btc-swing-scanner gold-scalp-scanner gold-swing-scanner us30-scalp-scanner us30-swing-scanner us30-momentum-scanner
