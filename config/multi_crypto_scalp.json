@@ -1,0 +1,95 @@
+{
+  "symbols": {
+    "BTC-USD": {
+      "enabled": true,
+      "asset_type": "crypto",
+      "display_name": "Bitcoin",
+      "emoji": "₿",
+      "timeframes": ["1m", "5m", "15m"],
+      "signal_rules": {
+        "volume_spike_threshold": 0.8,
+        "rsi_min": 30,
+        "rsi_max": 70,
+        "stop_loss_atr_multiplier": 1.5,
+        "take_profit_atr_multiplier": 2.0,
+        "min_confluence_factors": 4,
+        "min_confidence_score": 4,
+        "duplicate_time_window_minutes": 5,
+        "duplicate_price_threshold_percent": 0.3
+      },
+      "exit_rules": {
+        "grace_period_minutes": 5,
+        "min_profit_threshold_percent": 1.0,
+        "max_giveback_percent": 40,
+        "min_peak_profit_for_exit": 2.0
+      },
+      "volatility_thresholds": {
+        "min_atr_percent": 0.5,
+        "max_atr_percent": 10.0
+      }
+    },
+    "ETH-USD": {
+      "enabled": true,
+      "asset_type": "crypto",
+      "display_name": "Ethereum",
+      "emoji": "Ξ",
+      "timeframes": ["1m", "5m", "15m"],
+      "signal_rules": {
+        "volume_spike_threshold": 0.9,
+        "rsi_min": 30,
+        "rsi_max": 70,
+        "stop_loss_atr_multiplier": 1.8,
+        "take_profit_atr_multiplier": 2.2,
+        "min_confluence_factors": 4,
+        "min_confidence_score": 4,
+        "duplicate_time_window_minutes": 5,
+        "duplicate_price_threshold_percent": 0.3
+      },
+      "exit_rules": {
+        "grace_period_minutes": 5,
+        "min_profit_threshold_percent": 1.2,
+        "max_giveback_percent": 40,
+        "min_peak_profit_for_exit": 2.0
+      },
+      "volatility_thresholds": {
+        "min_atr_percent": 0.8,
+        "max_atr_percent": 12.0
+      }
+    },
+    "SOL-USD": {
+      "enabled": true,
+      "asset_type": "crypto",
+      "display_name": "Solana",
+      "emoji": "◎",
+      "timeframes": ["5m", "15m"],
+      "signal_rules": {
+        "volume_spike_threshold": 1.0,
+        "rsi_min": 30,
+        "rsi_max": 70,
+        "stop_loss_atr_multiplier": 2.0,
+        "take_profit_atr_multiplier": 2.5,
+        "min_confluence_factors": 4,
+        "min_confidence_score": 4,
+        "duplicate_time_window_minutes": 5,
+        "duplicate_price_threshold_percent": 0.5
+      },
+      "exit_rules": {
+        "grace_period_minutes": 5,
+        "min_profit_threshold_percent": 1.5,
+        "max_giveback_percent": 40,
+        "min_peak_profit_for_exit": 2.5
+      },
+      "volatility_thresholds": {
+        "min_atr_percent": 1.0,
+        "max_atr_percent": 15.0
+      }
+    }
+  },
+  "global_settings": {
+    "polling_interval_seconds": 60,
+    "max_concurrent_symbols": 10,
+    "signal_conflict_window_minutes": 5,
+    "duplicate_signal_window_minutes": 10,
+    "scanner_type": "crypto_scalp"
+  }
+}

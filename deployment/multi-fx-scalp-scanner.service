@@ -1,0 +1,17 @@
+[Unit]
+Description=Multi-FX Scalping Scanner (EUR/USD, GBP/USD - 5m/15m/1h)
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/trading-bot
+Environment="PATH=/home/ubuntu/trading-bot/venv/bin:/usr/local/bin:/usr/bin:/bin"
+ExecStart=/home/ubuntu/trading-bot/venv/bin/python3 /home/ubuntu/trading-bot/main_multi_symbol.py --config /home/ubuntu/trading-bot/config/multi_fx_scalp.json
+Restart=always
+RestartSec=10
+StandardOutput=append:/home/ubuntu/trading-bot/logs/multi_fx_scalp.log
+StandardError=append:/home/ubuntu/trading-bot/logs/multi_fx_scalp.log
+
+[Install]
+WantedBy=multi-user.target

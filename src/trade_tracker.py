@@ -1,6 +1,6 @@
 """Trade tracking and management for open positions."""
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, Dict
 from collections import deque
 import logging
@@ -24,7 +24,11 @@ class TradeStatus:
     extended_tp: Optional[float] = None
     highest_price: float = 0.0  # Track highest price for LONG trades
     lowest_price: float = float('inf')  # Track lowest price for SHORT trades
+    peak_profit_percent: float = 0.0  # Track peak profit percentage
+    last_exit_signal_time: Optional[datetime] = None  # Track last exit signal time
+    exit_signal_count: int = 0  # Count of exit signals sent
     status: str = "ACTIVE"  # ACTIVE, CLOSED_TP, CLOSED_SL, EXTENDED
+    symbol: str = "BTC/USD"  # Trading symbol for per-symbol tracking
 
 
 class TradeTracker:
@@ -36,39 +40,79 @@ class TradeTracker:
     - Target reached (close trade)
     - Stop-loss approaching (warning)
     - Trade closed (final P&L)
+    
+    Enhanced with:
+    - Grace period enforcement (30 minutes before exit evaluation)
+    - Minimum profit thresholds for exit signals
+    - Per-symbol trade tracking
+    - Strict exit conditions (no exits on negative P&L)
     """
     
-    def __init__(self, alerter):
+    def __init__(
+        self,
+        alerter,
+        grace_period_minutes: int = 5,
+        min_profit_threshold_crypto: float = 1.0,
+        min_profit_threshold_fx: float = 0.3,
+        max_giveback_percent: float = 40.0,
+        min_peak_profit_for_exit: float = 2.0,
+        duplicate_exit_window_minutes: int = 10
+    ):
         """
         Initialize trade tracker.
         
         Args:
             alerter: Alerter instance for sending updates
+            grace_period_minutes: Minimum time before evaluating exit conditions (default: 5 minutes)
+            min_profit_threshold_crypto: Minimum profit % for crypto exit signals
+            min_profit_threshold_fx: Minimum profit % for FX exit signals
+            max_giveback_percent: Maximum giveback % before exit signal
+            min_peak_profit_for_exit: Minimum peak profit % required for exit evaluation
+            duplicate_exit_window_minutes: Minimum time between duplicate exit signals
         """
         self.alerter = alerter
-        self.active_trades: Dict[str, TradeStatus] = {}
+        self.active_trades: Dict[str, TradeStatus] = {}  # Per-symbol tracking
         self.closed_trades: deque = deque(maxlen=100)
         
-        logger.info("Initialized TradeTracker")
+        # Enhanced exit rules
+        self.grace_period_minutes = grace_period_minutes
+        self.min_profit_threshold_crypto = min_profit_threshold_crypto
+        self.min_profit_threshold_fx = min_profit_threshold_fx
+        
+        # Win rate tracking per symbol
+        self.symbol_trade_history: Dict[str, deque] = {}  # symbol -> deque of (win: bool, profit_pct: float)
+        self.max_history_per_symbol = 20  # Track last 20 trades per symbol
+        self.max_giveback_percent = max_giveback_percent
+        self.min_peak_profit_for_exit = min_peak_profit_for_exit
+        self.duplicate_exit_window_minutes = duplicate_exit_window_minutes
+        
+        logger.info(f"Initialized Enhanced TradeTracker (grace_period={grace_period_minutes}m, "
+                   f"min_profit_crypto={min_profit_threshold_crypto}%, min_profit_fx={min_profit_threshold_fx}%)")
     
-    def add_trade(self, signal: Signal) -> None:
+    def add_trade(self, signal: Signal, symbol: Optional[str] = None) -> None:
         """
-        Add a new trade to tracking.
+        Add a new trade to tracking (per-symbol).
         
         Args:
             signal: Signal that was just generated
+            symbol: Trading symbol (optional, extracted from signal if not provided)
         """
-        trade_id = f"{signal.signal_type}_{signal.timestamp.strftime('%Y%m%d_%H%M%S')}"
+        # Extract symbol from signal or use provided
+        if symbol is None:
+            symbol = getattr(signal, 'symbol', 'BTC/USD')
+        
+        trade_id = f"{symbol}_{signal.signal_type}_{signal.timestamp.strftime('%Y%m%d_%H%M%S')}"
         
         trade_status = TradeStatus(
             signal=signal,
             entry_time=datetime.now(),
             highest_price=signal.entry_price,  # Initialize with entry price
-            lowest_price=signal.entry_price    # Initialize with entry price
+            lowest_price=signal.entry_price,   # Initialize with entry price
+            symbol=symbol
         )
         
         self.active_trades[trade_id] = trade_status
-        logger.info(f"Added trade to tracking: {trade_id}")
+        logger.info(f"Added trade to tracking: {trade_id} at ${signal.entry_price:.2f}")
     
     def update_trades(self, current_price: float, indicators: Optional[Dict] = None) -> None:
         """
@@ -114,7 +158,7 @@ class TradeTracker:
             # Check for management updates
             if not trade.breakeven_notified:
                 if self._check_breakeven_reached(signal, current_price):
-                    self._send_breakeven_update(signal, current_price)
+                    self._send_breakeven_update(signal, current_price, trade)
                     trade.breakeven_notified = True
             
             if not trade.stop_warning_sent:
@@ -163,7 +207,14 @@ class TradeTracker:
         """
         Check if momentum is reversing - signal to EXIT the trade.
         
-        Criteria for EXIT alert:
+        ENHANCED with strict exit rules:
+        1. Grace period: Must wait 30 minutes after entry
+        2. Minimum profit: Current profit must be positive and > threshold
+        3. Peak profit: Peak profit must have exceeded minimum threshold
+        4. Giveback: Only exit when giving back > 40% of peak profit
+        5. Duplicate prevention: No duplicate exit signals within 10 minutes
+        
+        Original criteria for EXIT alert:
         1. Trade was in significant profit (reached 70%+ to target)
         2. Now giving back gains (dropped 50%+ from highest/lowest)
         3. RSI showing reversal (overbought for LONG, oversold for SHORT)
@@ -179,6 +230,51 @@ class TradeTracker:
         Returns:
             True if momentum reversal detected
         """
+        # STRICT RULE 1: Grace period enforcement
+        time_since_entry = datetime.now() - trade.entry_time
+        if time_since_entry < timedelta(minutes=self.grace_period_minutes):
+            logger.debug(f"Grace period active: {time_since_entry.total_seconds()/60:.1f}m / {self.grace_period_minutes}m")
+            return False
+        
+        # STRICT RULE 2: Check duplicate exit signal prevention
+        if trade.last_exit_signal_time:
+            time_since_last_exit = datetime.now() - trade.last_exit_signal_time
+            if time_since_last_exit < timedelta(minutes=self.duplicate_exit_window_minutes):
+                logger.debug(f"Duplicate exit signal suppressed: {time_since_last_exit.total_seconds()/60:.1f}m since last")
+                return False
+        
+        # Calculate current profit
+        if signal.signal_type == "LONG":
+            current_profit_pct = ((current_price - signal.entry_price) / signal.entry_price) * 100
+            peak_profit_pct = ((trade.highest_price - signal.entry_price) / signal.entry_price) * 100
+        else:
+            current_profit_pct = ((signal.entry_price - current_price) / signal.entry_price) * 100
+            peak_profit_pct = ((signal.entry_price - trade.lowest_price) / signal.entry_price) * 100
+        
+        # Update peak profit tracking
+        trade.peak_profit_percent = max(trade.peak_profit_percent, peak_profit_pct)
+        
+        # STRICT RULE 3: Current profit must be positive
+        if current_profit_pct <= 0:
+            logger.debug(f"Exit suppressed: Current profit is negative ({current_profit_pct:.2f}%)")
+            return False
+        
+        # STRICT RULE 4: Peak profit must have exceeded minimum threshold
+        # Determine threshold based on asset type (crypto vs fx)
+        # For now, assume crypto (can be enhanced with asset type detection)
+        min_threshold = self.min_profit_threshold_crypto
+        if trade.peak_profit_percent < min_threshold:
+            logger.debug(f"Exit suppressed: Peak profit {trade.peak_profit_percent:.2f}% < threshold {min_threshold}%")
+            return False
+        
+        # STRICT RULE 5: Must be giving back significant gains
+        giveback_pct = ((trade.peak_profit_percent - current_profit_pct) / trade.peak_profit_percent) * 100 if trade.peak_profit_percent > 0 else 0
+        
+        if giveback_pct < self.max_giveback_percent:
+            logger.debug(f"Exit suppressed: Giveback {giveback_pct:.1f}% < threshold {self.max_giveback_percent}%")
+            return False
+        
+        # If we reach here, strict rules are satisfied - now check momentum indicators
         rsi = indicators.get('rsi', 50)
         prev_rsi = indicators.get('prev_rsi', 50)
         volume_ratio = indicators.get('volume_ratio', 1.0)
@@ -235,6 +331,10 @@ class TradeTracker:
     
     def _send_momentum_reversal_alert(self, signal: Signal, current_price: float, indicators: Dict, trade: TradeStatus) -> None:
         """Send EXIT NOW alert when momentum reverses."""
+        # Update exit signal tracking
+        trade.last_exit_signal_time = datetime.now()
+        trade.exit_signal_count += 1
+        
         rsi = indicators.get('rsi', 0)
         volume_ratio = indicators.get('volume_ratio', 0)
         
@@ -396,7 +496,7 @@ This is a runner! The trend is strong and likely to continue past your original 
         self.alerter.send_message(message)
         logger.info(f"Sent TP extension alert for {signal.signal_type} trade: ${signal.take_profit:,.2f} -> ${extended_tp:,.2f}")
     
-    def _send_breakeven_update(self, signal: Signal, current_price: float) -> None:
+    def _send_breakeven_update(self, signal: Signal, current_price: float, trade: TradeStatus) -> None:
         """Send notification to move stop to breakeven."""
         breakeven = signal.get_breakeven_price()
         
@@ -418,7 +518,11 @@ This locks in a risk-free trade. If price reverses, you exit at breakeven. If it
         
         # Update the signal's stop-loss to breakeven for tracking
         signal.stop_loss = signal.entry_price
-        logger.info(f"Sent breakeven update for {signal.signal_type} trade - stop moved to ${signal.entry_price:,.2f}")
+        
+        # Disable momentum exit signals after reaching breakeven
+        trade.momentum_reversal_notified = True
+        
+        logger.info(f"Sent breakeven update for {signal.signal_type} trade - stop moved to ${signal.entry_price:,.2f}, momentum exits disabled")
     
     def _send_stop_warning(self, signal: Signal, current_price: float) -> None:
         """Send warning that stop-loss is approaching."""
@@ -500,6 +604,10 @@ R:R Achieved: {rr_achieved:.2f}
         self.alerter.send_message(message)
         logger.info(f"Closed trade {trade_id}: {reason}, P&L: {pnl_percent:.2f}%")
         
+        # Record trade result for win rate tracking
+        is_win = (reason == "TARGET")
+        self._record_trade_result(signal.symbol, is_win, pnl_percent)
+        
         # Move to closed trades
         self.closed_trades.append(trade)
         del self.active_trades[trade_id]
@@ -511,3 +619,63 @@ R:R Achieved: {rr_achieved:.2f}
     def get_closed_count(self) -> int:
         """Get number of closed trades."""
         return len(self.closed_trades)
+
+    def _record_trade_result(self, symbol: str, is_win: bool, profit_pct: float) -> None:
+        """
+        Record trade result for win rate tracking.
+        
+        Args:
+            symbol: Trading symbol
+            is_win: Whether trade was a winner
+            profit_pct: Profit percentage
+        """
+        if symbol not in self.symbol_trade_history:
+            self.symbol_trade_history[symbol] = deque(maxlen=self.max_history_per_symbol)
+        
+        self.symbol_trade_history[symbol].append((is_win, profit_pct))
+        logger.debug(f"Recorded trade result for {symbol}: {'WIN' if is_win else 'LOSS'} ({profit_pct:.2f}%)")
+    
+    def get_symbol_win_rate(self, symbol: str) -> Optional[float]:
+        """
+        Get win rate for a specific symbol.
+        
+        Args:
+            symbol: Trading symbol
+            
+        Returns:
+            Win rate as percentage (0-100) or None if insufficient data
+        """
+        if symbol not in self.symbol_trade_history:
+            return None
+        
+        history = self.symbol_trade_history[symbol]
+        if len(history) < 5:  # Need at least 5 trades for meaningful win rate
+            return None
+        
+        wins = sum(1 for is_win, _ in history if is_win)
+        total = len(history)
+        win_rate = (wins / total) * 100
+        
+        return win_rate
+    
+    def get_dynamic_confidence_adjustment(self, symbol: str) -> int:
+        """
+        Get confidence adjustment based on recent win rate.
+        
+        Args:
+            symbol: Trading symbol
+            
+        Returns:
+            Confidence adjustment (-1, 0, or +1)
+        """
+        win_rate = self.get_symbol_win_rate(symbol)
+        
+        if win_rate is None:
+            return 0  # No adjustment if insufficient data
+        
+        if win_rate > 60:
+            return -1  # Reduce min_confidence (more lenient)
+        elif win_rate < 40:
+            return +1  # Increase min_confidence (more strict)
+        else:
+            return 0  # No adjustment

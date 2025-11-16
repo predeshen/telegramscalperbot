@@ -1,0 +1,17 @@
+[Unit]
+Description=Multi-Crypto Swing Scanner (BTC, ETH - 15m/1h/4h/1d)
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/trading-bot
+Environment="PATH=/home/ubuntu/trading-bot/venv/bin:/usr/local/bin:/usr/bin:/bin"
+ExecStart=/home/ubuntu/trading-bot/venv/bin/python3 /home/ubuntu/trading-bot/main_multi_symbol.py --config /home/ubuntu/trading-bot/config/multi_crypto_swing.json
+Restart=always
+RestartSec=10
+StandardOutput=append:/home/ubuntu/trading-bot/logs/multi_crypto_swing.log
+StandardError=append:/home/ubuntu/trading-bot/logs/multi_crypto_swing.log
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,98 @@
+{
+  "symbols": {
+    "EURUSD=X": {
+      "enabled": true,
+      "asset_type": "fx",
+      "display_name": "EUR/USD",
+      "emoji": "💱",
+      "timeframes": ["5m", "15m", "1h"],
+      "signal_rules": {
+        "volume_spike_threshold": 1.2,
+        "rsi_min": 35,
+        "rsi_max": 65,
+        "stop_loss_atr_multiplier": 1.2,
+        "take_profit_atr_multiplier": 1.5,
+        "min_confluence_factors": 5,
+        "min_confidence_score": 4,
+        "duplicate_time_window_minutes": 5,
+        "duplicate_price_threshold_percent": 0.2
+      },
+      "exit_rules": {
+        "grace_period_minutes": 5,
+        "min_profit_threshold_percent": 0.3,
+        "max_giveback_percent": 35,
+        "min_peak_profit_for_exit": 0.5
+      },
+      "trading_sessions": {
+        "primary": ["London", "NewYork"],
+        "secondary": ["Asian"],
+        "require_primary_session": true
+      }
+    },
+    "GBPUSD=X": {
+      "enabled": true,
+      "asset_type": "fx",
+      "display_name": "GBP/USD",
+      "emoji": "💷",
+      "timeframes": ["5m", "15m", "1h"],
+      "signal_rules": {
+        "volume_spike_threshold": 1.3,
+        "rsi_min": 35,
+        "rsi_max": 65,
+        "stop_loss_atr_multiplier": 1.3,
+        "take_profit_atr_multiplier": 1.6,
+        "min_confluence_factors": 5,
+        "min_confidence_score": 4,
+        "duplicate_time_window_minutes": 5,
+        "duplicate_price_threshold_percent": 0.2
+      },
+      "exit_rules": {
+        "grace_period_minutes": 5,
+        "min_profit_threshold_percent": 0.4,
+        "max_giveback_percent": 35,
+        "min_peak_profit_for_exit": 0.6
+      },
+      "trading_sessions": {
+        "primary": ["London", "NewYork"],
+        "secondary": ["Asian"],
+        "require_primary_session": true
+      }
+    },
+    "USDJPY=X": {
+      "enabled": false,
+      "asset_type": "fx",
+      "display_name": "USD/JPY",
+      "emoji": "💴",
+      "timeframes": ["5m", "15m", "1h"],
+      "signal_rules": {
+        "volume_spike_threshold": 1.1,
+        "rsi_min": 35,
+        "rsi_max": 65,
+        "stop_loss_atr_multiplier": 1.2,
+        "take_profit_atr_multiplier": 1.5,
+        "min_confluence_factors": 5,
+        "min_confidence_score": 4,
+        "duplicate_time_window_minutes": 5,
+        "duplicate_price_threshold_percent": 0.2
+      },
+      "exit_rules": {
+        "grace_period_minutes": 5,
+        "min_profit_threshold_percent": 0.3,
+        "max_giveback_percent": 35,
+        "min_peak_profit_for_exit": 0.5
+      },
+      "trading_sessions": {
+        "primary": ["Asian", "London"],
+        "secondary": ["NewYork"],
+        "require_primary_session": true
+      }
+    }
+  },
+  "global_settings": {
+    "polling_interval_seconds": 60,
+    "max_concurrent_symbols": 10,
+    "signal_conflict_window_minutes": 5,
+    "duplicate_signal_window_minutes": 10,
+    "scanner_type": "fx_scalp"
+  }
+}

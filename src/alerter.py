@@ -60,7 +60,8 @@ class EmailAlerter:
         Returns:
             True if sent successfully, False otherwise
         """
-        subject = f"[BTC SCALP] {signal.signal_type} Signal - {signal.timeframe}"
+        display_name = getattr(signal, 'display_name', 'BTC')
+        subject = f"[{display_name}] {signal.signal_type} Signal - {signal.timeframe}"
         body = self._format_signal_email(signal)
         
         return self._send_email(subject, body, max_retries=3)
@@ -288,6 +289,9 @@ Time: {time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime())}
         # Format signal type with emoji
         signal_emoji = "🟢" if signal.signal_type == "LONG" else "🔴"
         symbol = getattr(signal, 'symbol', 'BTC/USD')  # Default to BTC/USD for backward compatibility
+        display_name = getattr(signal, 'display_name', symbol)
+        symbol_emoji = getattr(signal, 'emoji', '📊')
+        asset_type = getattr(signal, 'asset_type', 'crypto')
         
         # Check if this is an H4 HVG signal for enhanced formatting
         is_h4_hvg = getattr(signal, 'strategy', '') == 'H4 HVG'
@@ -295,12 +299,12 @@ Time: {time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime())}
         volume_spike_ratio = getattr(signal, 'volume_spike_ratio', None)
         confluence_factors = getattr(signal, 'confluence_factors', None)
         
-        # Enhanced header for H4 HVG signals
+        # Enhanced header for H4 HVG signals with symbol emoji
         if is_h4_hvg:
             gap_direction = "⬆️" if signal.signal_type == "LONG" else "⬇️"
-            message_header = f"{signal_emoji} *{symbol} H4 HVG {signal.signal_type}* {gap_direction}"
+            message_header = f"{signal_emoji} {symbol_emoji} *{display_name} H4 HVG {signal.signal_type}* {gap_direction}"
         else:
-            message_header = f"{signal_emoji} *{symbol} {signal.signal_type} SIGNAL*"
+            message_header = f"{signal_emoji} {symbol_emoji} *{display_name} {signal.signal_type} SIGNAL*"
         
         # Check for hold period information (US30 Momentum strategy)
         hold_type = None

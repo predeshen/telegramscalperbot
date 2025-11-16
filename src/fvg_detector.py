@@ -1,221 +1,362 @@
 """
-Fair Value Gap (FVG) Detector
-Detects imbalance zones where price moved too fast, leaving gaps to be filled
+FVG Detector - Fair Value Gap Detection
+Detects institutional supply/demand zones based on price gaps.
 """
 import logging
 from dataclasses import dataclass
-from typing import Optional, List
-import pandas as pd
 from datetime import datetime
+from typing import List, Tuple, Optional, Dict
+import pandas as pd
+import numpy as np
+
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
-class FVG:
-    """Fair Value Gap information"""
-    gap_type: str  # "bullish" or "bearish"
-    gap_high: float
-    gap_low: float
-    gap_size: float
-    gap_percent: float
+class FVGZone:
+    """Represents a Fair Value Gap zone."""
+    fvg_type: str  # 'inverse' (bearish) or 'regular' (bullish)
+    timeframe: str
+    high: float  # Upper boundary of gap
+    low: float  # Lower boundary of gap
+    gap_percent: float  # Gap size as percentage
+    created_at: datetime
     candle_index: int
-    timestamp: datetime
-    volume_ratio: float  # Volume during gap formation
-    is_filled: bool = False
-    
-    def contains_price(self, price: float) -> bool:
-        """Check if price is within the gap"""
-        return self.gap_low <= price <= self.gap_high
-    
-    def get_midpoint(self) -> float:
-        """Get gap midpoint"""
-        return (self.gap_high + self.gap_low) / 2
+    filled: bool = False
+    filled_at: Optional[datetime] = None
+    respect_count: int = 0  # Number of times price respected this zone
 
 
 class FVGDetector:
-    """
-    Detect Fair Value Gaps (FVG) - 3-candle patterns where price gaps
+    """Detects Fair Value Gaps and liquidity voids."""
     
-    Bullish FVG: Candle 1 high < Candle 3 low (gap between them)
-    Bearish FVG: Candle 1 low > Candle 3 high (gap between them)
-    """
-    
-    def __init__(self, min_gap_percent: float = 0.05, max_lookback: int = 20):
+    def __init__(self, min_gap_percent: float = 0.2):
         """
-        Initialize FVG detector
+        Initialize FVG detector.
         
         Args:
-            min_gap_percent: Minimum gap size as % of price (0.05 = 0.05%)
-            max_lookback: Maximum candles to look back for unfilled gaps
+            min_gap_percent: Minimum gap size as percentage of price
         """
         self.min_gap_percent = min_gap_percent
-        self.max_lookback = max_lookback
-        logger.info(f"FVGDetector initialized: min_gap={min_gap_percent}%, lookback={max_lookback}")
+        self.active_fvgs: Dict[str, List[FVGZone]] = {}  # timeframe -> zones
+        
+        logger.info(f"Initialized FVGDetector (min_gap={min_gap_percent}%)")
     
-    def detect_fvg(self, data: pd.DataFrame) -> Optional[FVG]:
+    def detect_fvgs(self, df: pd.DataFrame, timeframe: str) -> List[FVGZone]:
         """
-        Detect most recent FVG in the data
+        Detect Fair Value Gaps in candlestick data.
+        
+        An FVG exists when there's a gap between candles:
+        - Inverse FVG (bearish): candle[i-1].low > candle[i+1].high
+        - Regular FVG (bullish): candle[i-1].high < candle[i+1].low
         
         Args:
-            data: DataFrame with OHLCV data
+            df: DataFrame with OHLCV data
+            timeframe: Timeframe being analyzed
             
         Returns:
-            FVG object if detected, None otherwise
+            List of newly detected FVG zones
         """
-        if len(data) < 3:
-            return None
-        
         try:
-            # Check last 3 candles for FVG formation
-            candle_1 = data.iloc[-3]
-            candle_2 = data.iloc[-2]
-            candle_3 = data.iloc[-1]
+            if df.empty or len(df) < 3:
+                return []
             
-            current_price = candle_3['close']
+            new_fvgs = []
             
-            # Bullish FVG: Gap between candle 1 high and candle 3 low
-            if candle_1['high'] < candle_3['low']:
-                gap_low = candle_1['high']
-                gap_high = candle_3['low']
-                gap_size = gap_high - gap_low
-                gap_percent = (gap_size / current_price) * 100
+            # Scan for FVGs (need at least 3 candles)
+            for i in range(1, len(df) - 1):
+                prev_candle = df.iloc[i - 1]
+                current_candle = df.iloc[i]
+                next_candle = df.iloc[i + 1]
                 
-                # Check minimum gap size
-                if gap_percent >= self.min_gap_percent:
-                    volume_ratio = candle_3['volume'] / candle_3.get('volume_ma', candle_3['volume'])
-                    
-                    fvg = FVG(
-                        gap_type="bullish",
-                        gap_high=gap_high,
-                        gap_low=gap_low,
-                        gap_size=gap_size,
-                        gap_percent=gap_percent,
-                        candle_index=len(data) - 1,
-                        timestamp=candle_3['timestamp'],
-                        volume_ratio=volume_ratio
-                    )
-                    
-                    logger.info(f"Bullish FVG detected: {gap_low:.2f} - {gap_high:.2f} ({gap_percent:.2f}%), Volume: {volume_ratio:.2f}x")
-                    return fvg
-            
-            # Bearish FVG: Gap between candle 1 low and candle 3 high
-            elif candle_1['low'] > candle_3['high']:
-                gap_high = candle_1['low']
-                gap_low = candle_3['high']
-                gap_size = gap_high - gap_low
-                gap_percent = (gap_size / current_price) * 100
-                
-                # Check minimum gap size
-                if gap_percent >= self.min_gap_percent:
-                    volume_ratio = candle_3['volume'] / candle_3.get('volume_ma', candle_3['volume'])
-                    
-                    fvg = FVG(
-                        gap_type="bearish",
-                        gap_high=gap_high,
-                        gap_low=gap_low,
-                        gap_size=gap_size,
-                        gap_percent=gap_percent,
-                        candle_index=len(data) - 1,
-                        timestamp=candle_3['timestamp'],
-                        volume_ratio=volume_ratio
-                    )
-                    
-                    logger.info(f"Bearish FVG detected: {gap_low:.2f} - {gap_high:.2f} ({gap_percent:.2f}%), Volume: {volume_ratio:.2f}x")
-                    return fvg
-            
-            return None
-            
-        except Exception as e:
-            logger.error(f"Error detecting FVG: {e}")
-            return None
-    
-    def get_unfilled_fvgs(self, data: pd.DataFrame) -> List[FVG]:
-        """
-        Get all unfilled FVGs in recent history
-        
-        Args:
-            data: DataFrame with OHLCV data
-            
-        Returns:
-            List of unfilled FVG objects
-        """
-        unfilled_fvgs = []
-        
-        if len(data) < 3:
-            return unfilled_fvgs
-        
-        try:
-            current_price = data.iloc[-1]['close']
-            
-            # Look back through recent candles
-            lookback = min(self.max_lookback, len(data) - 2)
-            
-            for i in range(lookback):
-                idx = -(i + 3)  # Start from 3 candles back
-                
-                if abs(idx) > len(data):
-                    break
-                
-                candle_1 = data.iloc[idx]
-                candle_2 = data.iloc[idx + 1]
-                candle_3 = data.iloc[idx + 2]
-                
-                # Bullish FVG
-                if candle_1['high'] < candle_3['low']:
-                    gap_low = candle_1['high']
-                    gap_high = candle_3['low']
+                # Check for Inverse FVG (bearish gap)
+                if prev_candle['low'] > next_candle['high']:
+                    gap_high = prev_candle['low']
+                    gap_low = next_candle['high']
                     gap_size = gap_high - gap_low
-                    gap_percent = (gap_size / current_price) * 100
+                    gap_percent = (gap_size / prev_candle['close']) * 100
                     
                     if gap_percent >= self.min_gap_percent:
-                        # Check if gap is still unfilled (current price hasn't touched it)
-                        if current_price > gap_high:
-                            volume_ratio = candle_3['volume'] / candle_3.get('volume_ma', candle_3['volume'])
-                            
-                            fvg = FVG(
-                                gap_type="bullish",
-                                gap_high=gap_high,
-                                gap_low=gap_low,
-                                gap_size=gap_size,
-                                gap_percent=gap_percent,
-                                candle_index=len(data) + idx + 2,
-                                timestamp=candle_3['timestamp'],
-                                volume_ratio=volume_ratio,
-                                is_filled=False
-                            )
-                            unfilled_fvgs.append(fvg)
+                        fvg = FVGZone(
+                            fvg_type='inverse',
+                            timeframe=timeframe,
+                            high=gap_high,
+                            low=gap_low,
+                            gap_percent=gap_percent,
+                            created_at=current_candle['timestamp'],
+                            candle_index=i
+                        )
+                        new_fvgs.append(fvg)
+                        logger.info(f"Inverse FVG detected on {timeframe}: ${gap_low:.2f}-${gap_high:.2f} ({gap_percent:.2f}%)")
                 
-                # Bearish FVG
-                elif candle_1['low'] > candle_3['high']:
-                    gap_high = candle_1['low']
-                    gap_low = candle_3['high']
+                # Check for Regular FVG (bullish gap)
+                elif prev_candle['high'] < next_candle['low']:
+                    gap_low = prev_candle['high']
+                    gap_high = next_candle['low']
                     gap_size = gap_high - gap_low
-                    gap_percent = (gap_size / current_price) * 100
+                    gap_percent = (gap_size / prev_candle['close']) * 100
                     
                     if gap_percent >= self.min_gap_percent:
-                        # Check if gap is still unfilled (current price hasn't touched it)
-                        if current_price < gap_low:
-                            volume_ratio = candle_3['volume'] / candle_3.get('volume_ma', candle_3['volume'])
-                            
-                            fvg = FVG(
-                                gap_type="bearish",
-                                gap_high=gap_high,
-                                gap_low=gap_low,
-                                gap_size=gap_size,
-                                gap_percent=gap_percent,
-                                candle_index=len(data) + idx + 2,
-                                timestamp=candle_3['timestamp'],
-                                volume_ratio=volume_ratio,
-                                is_filled=False
-                            )
-                            unfilled_fvgs.append(fvg)
+                        fvg = FVGZone(
+                            fvg_type='regular',
+                            timeframe=timeframe,
+                            high=gap_high,
+                            low=gap_low,
+                            gap_percent=gap_percent,
+                            created_at=current_candle['timestamp'],
+                            candle_index=i
+                        )
+                        new_fvgs.append(fvg)
+                        logger.info(f"Regular FVG detected on {timeframe}: ${gap_low:.2f}-${gap_high:.2f} ({gap_percent:.2f}%)")
             
-            if unfilled_fvgs:
-                logger.debug(f"Found {len(unfilled_fvgs)} unfilled FVGs")
+            # Add to active FVGs
+            if timeframe not in self.active_fvgs:
+                self.active_fvgs[timeframe] = []
             
-            return unfilled_fvgs
+            self.active_fvgs[timeframe].extend(new_fvgs)
+            
+            # Keep only recent FVGs (last 20)
+            self.active_fvgs[timeframe] = self.active_fvgs[timeframe][-20:]
+            
+            return new_fvgs
             
         except Exception as e:
-            logger.error(f"Error getting unfilled FVGs: {e}")
+            logger.error(f"Error detecting FVGs: {e}")
             return []
+    
+    def check_fvg_reentry(
+        self,
+        current_price: float,
+        fvg_zone: FVGZone,
+        tolerance_pct: float = 0.1
+    ) -> bool:
+        """
+        Check if price has re-entered an FVG zone.
+        
+        Args:
+            current_price: Current market price
+            fvg_zone: FVG zone to check
+            tolerance_pct: Tolerance percentage for zone boundaries
+            
+        Returns:
+            True if price is in the zone
+        """
+        try:
+            # Add tolerance to zone boundaries
+            tolerance = (fvg_zone.high - fvg_zone.low) * (tolerance_pct / 100)
+            zone_high = fvg_zone.high + tolerance
+            zone_low = fvg_zone.low - tolerance
+            
+            return zone_low <= current_price <= zone_high
+            
+        except Exception as e:
+            logger.error(f"Error checking FVG re-entry: {e}")
+            return False
+    
+    def detect_lower_tf_shift(
+        self,
+        df_lower: pd.DataFrame,
+        fvg_zone: FVGZone
+    ) -> Tuple[bool, str]:
+        """
+        Detect market structure shift on lower timeframe within FVG zone.
+        
+        For inverse FVG (bearish):
+        - Look for break of structure (BOS) to downside
+        - Confirm with lower high formation
+        
+        For regular FVG (bullish):
+        - Look for break of structure (BOS) to upside
+        - Confirm with higher low formation
+        
+        Args:
+            df_lower: Lower timeframe DataFrame
+            fvg_zone: FVG zone to analyze
+            
+        Returns:
+            (shift_detected, shift_description)
+        """
+        try:
+            if df_lower.empty or len(df_lower) < 10:
+                return False, "Insufficient data"
+            
+            # Get recent candles
+            recent = df_lower.tail(10)
+            
+            if fvg_zone.fvg_type == 'inverse':
+                # Bearish FVG - look for downside break
+                # Find recent high
+                recent_high = recent['high'].max()
+                recent_high_idx = recent['high'].idxmax()
+                
+                # Check if price broke below recent low after making high
+                candles_after_high = recent.loc[recent_high_idx:]
+                if len(candles_after_high) > 1:
+                    recent_low = candles_after_high['low'].min()
+                    
+                    # Check for lower high formation
+                    if recent['high'].iloc[-1] < recent_high:
+                        return True, f"Bearish BOS: Lower high at ${recent['high'].iloc[-1]:.2f}"
+            
+            else:  # regular FVG
+                # Bullish FVG - look for upside break
+                # Find recent low
+                recent_low = recent['low'].min()
+                recent_low_idx = recent['low'].idxmin()
+                
+                # Check if price broke above recent high after making low
+                candles_after_low = recent.loc[recent_low_idx:]
+                if len(candles_after_low) > 1:
+                    recent_high = candles_after_low['high'].max()
+                    
+                    # Check for higher low formation
+                    if recent['low'].iloc[-1] > recent_low:
+                        return True, f"Bullish BOS: Higher low at ${recent['low'].iloc[-1]:.2f}"
+            
+            return False, "No structure shift detected"
+            
+        except Exception as e:
+            logger.error(f"Error detecting lower TF shift: {e}")
+            return False, f"Error: {str(e)}"
+    
+    def calculate_fvg_targets(
+        self,
+        df: pd.DataFrame,
+        fvg_zone: FVGZone,
+        lookback: int = 50
+    ) -> Tuple[float, float]:
+        """
+        Calculate target levels based on swing points and liquidity.
+        
+        Args:
+            df: DataFrame with price data
+            fvg_zone: FVG zone
+            lookback: Number of candles to look back
+            
+        Returns:
+            (target1, target2) - Two target levels
+        """
+        try:
+            if df.empty or len(df) < lookback:
+                lookback = len(df)
+            
+            recent = df.tail(lookback)
+            
+            if fvg_zone.fvg_type == 'inverse':
+                # Bearish targets - find swing lows
+                lows = recent['low'].values
+                
+                # Find local minima
+                swing_lows = []
+                for i in range(2, len(lows) - 2):
+                    if lows[i] < lows[i-1] and lows[i] < lows[i-2] and \
+                       lows[i] < lows[i+1] and lows[i] < lows[i+2]:
+                        swing_lows.append(lows[i])
+                
+                if len(swing_lows) >= 2:
+                    swing_lows.sort()
+                    target1 = swing_lows[0]
+                    target2 = swing_lows[1] if len(swing_lows) > 1 else swing_lows[0] * 0.98
+                else:
+                    # Default targets below FVG
+                    target1 = fvg_zone.low * 0.98
+                    target2 = fvg_zone.low * 0.96
+            
+            else:  # regular FVG
+                # Bullish targets - find swing highs
+                highs = recent['high'].values
+                
+                # Find local maxima
+                swing_highs = []
+                for i in range(2, len(highs) - 2):
+                    if highs[i] > highs[i-1] and highs[i] > highs[i-2] and \
+                       highs[i] > highs[i+1] and highs[i] > highs[i+2]:
+                        swing_highs.append(highs[i])
+                
+                if len(swing_highs) >= 2:
+                    swing_highs.sort(reverse=True)
+                    target1 = swing_highs[0]
+                    target2 = swing_highs[1] if len(swing_highs) > 1 else swing_highs[0] * 1.02
+                else:
+                    # Default targets above FVG
+                    target1 = fvg_zone.high * 1.02
+                    target2 = fvg_zone.high * 1.04
+            
+            return target1, target2
+            
+        except Exception as e:
+            logger.error(f"Error calculating FVG targets: {e}")
+            # Return default targets
+            if fvg_zone.fvg_type == 'inverse':
+                return fvg_zone.low * 0.98, fvg_zone.low * 0.96
+            else:
+                return fvg_zone.high * 1.02, fvg_zone.high * 1.04
+    
+    def mark_fvg_filled(self, fvg_zone: FVGZone, current_time: datetime) -> None:
+        """
+        Mark an FVG zone as filled when price fully retraces through it.
+        
+        Args:
+            fvg_zone: FVG zone to mark as filled
+            current_time: Current timestamp
+        """
+        fvg_zone.filled = True
+        fvg_zone.filled_at = current_time
+        logger.info(f"FVG zone marked as filled: {fvg_zone.fvg_type} ${fvg_zone.low:.2f}-${fvg_zone.high:.2f}")
+    
+    def get_active_fvgs(self, timeframe: str, include_filled: bool = False) -> List[FVGZone]:
+        """
+        Get active FVG zones for a timeframe.
+        
+        Args:
+            timeframe: Timeframe to get FVGs for
+            include_filled: Whether to include filled zones
+            
+        Returns:
+            List of FVG zones
+        """
+        if timeframe not in self.active_fvgs:
+            return []
+        
+        if include_filled:
+            return self.active_fvgs[timeframe]
+        else:
+            return [fvg for fvg in self.active_fvgs[timeframe] if not fvg.filled]
+    
+    def cleanup_old_fvgs(self, max_age_candles: int = 100) -> None:
+        """
+        Remove old FVG zones.
+        
+        Args:
+            max_age_candles: Maximum age in candles
+        """
+        for timeframe in self.active_fvgs:
+            # Keep only recent FVGs
+            self.active_fvgs[timeframe] = self.active_fvgs[timeframe][-max_age_candles:]
+
+
+if __name__ == "__main__":
+    # Example usage
+    logging.basicConfig(level=logging.INFO)
+    
+    # Create sample data with a gap
+    data = {
+        'timestamp': pd.date_range('2025-01-01', periods=10, freq='1H'),
+        'open': [100, 101, 102, 103, 104, 105, 106, 107, 108, 109],
+        'high': [101, 102, 103, 104, 105, 106, 107, 108, 109, 110],
+        'low': [99, 100, 101, 102, 103, 104, 105, 106, 107, 108],
+        'close': [100.5, 101.5, 102.5, 103.5, 104.5, 105.5, 106.5, 107.5, 108.5, 109.5],
+        'volume': [1000] * 10
+    }
+    df = pd.DataFrame(data)
+    
+    # Create FVG detector
+    detector = FVGDetector(min_gap_percent=0.1)
+    
+    # Detect FVGs
+    fvgs = detector.detect_fvgs(df, '1h')
+    print(f"Detected {len(fvgs)} FVGs")
+    
+    for fvg in fvgs:
+        print(f"  {fvg.fvg_type}: ${fvg.low:.2f}-${fvg.high:.2f} ({fvg.gap_percent:.2f}%)")

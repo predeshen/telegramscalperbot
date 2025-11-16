@@ -1,0 +1,88 @@
+{
+  "symbols": {
+    "BTC-USD": {
+      "enabled": true,
+      "asset_type": "crypto",
+      "display_name": "Bitcoin",
+      "emoji": "₿",
+      "timeframes": ["15m", "1h", "4h"],
+      "signal_rules": {
+        "volume_spike_threshold": 0.8,
+        "rsi_min": 30,
+        "rsi_max": 70,
+        "stop_loss_atr_multiplier": 1.8,
+        "take_profit_atr_multiplier": 2.0,
+        "min_confluence_factors": 4,
+        "min_confidence_score": 4,
+        "duplicate_time_window_minutes": 30,
+        "duplicate_price_threshold_percent": 0.4
+      },
+      "exit_rules": {
+        "grace_period_minutes": 10,
+        "min_profit_threshold_percent": 1.2,
+        "max_giveback_percent": 40,
+        "min_peak_profit_for_exit": 2.0
+      }
+    },
+    "ETH-USD": {
+      "enabled": true,
+      "asset_type": "crypto",
+      "display_name": "Ethereum",
+      "emoji": "Ξ",
+      "timeframes": ["15m", "1h", "4h"],
+      "signal_rules": {
+        "volume_spike_threshold": 0.9,
+        "rsi_min": 30,
+        "rsi_max": 70,
+        "stop_loss_atr_multiplier": 2.0,
+        "take_profit_atr_multiplier": 2.2,
+        "min_confluence_factors": 4,
+        "min_confidence_score": 4,
+        "duplicate_time_window_minutes": 30,
+        "duplicate_price_threshold_percent": 0.4
+      },
+      "exit_rules": {
+        "grace_period_minutes": 10,
+        "min_profit_threshold_percent": 1.5,
+        "max_giveback_percent": 40,
+        "min_peak_profit_for_exit": 2.0
+      }
+    },
+    "EURUSD=X": {
+      "enabled": true,
+      "asset_type": "fx",
+      "display_name": "EUR/USD",
+      "emoji": "💱",
+      "timeframes": ["1h", "4h"],
+      "signal_rules": {
+        "volume_spike_threshold": 1.2,
+        "rsi_min": 35,
+        "rsi_max": 65,
+        "stop_loss_atr_multiplier": 1.2,
+        "take_profit_atr_multiplier": 1.5,
+        "min_confluence_factors": 5,
+        "min_confidence_score": 4,
+        "duplicate_time_window_minutes": 30,
+        "duplicate_price_threshold_percent": 0.3
+      },
+      "exit_rules": {
+        "grace_period_minutes": 10,
+        "min_profit_threshold_percent": 0.4,
+        "max_giveback_percent": 35,
+        "min_peak_profit_for_exit": 0.6
+      },
+      "trading_sessions": {
+        "primary": ["London", "NewYork"],
+        "secondary": ["Asian"],
+        "require_primary_session": true
+      }
+    }
+  },
+  "global_settings": {
+    "polling_interval_seconds": 60,
+    "max_concurrent_symbols": 10,
+    "signal_conflict_window_minutes": 5,
+    "duplicate_signal_window_minutes": 10,
+    "scanner_type": "mixed"
+  }
+}

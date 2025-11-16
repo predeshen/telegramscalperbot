@@ -65,6 +65,9 @@ class ExcelReporter:
         # Excel logging disabled flag
         self.excel_disabled = False
         
+        # Symbol sheet tracking
+        self.symbol_sheets: Dict[str, bool] = {}  # Track which symbol sheets exist
+        
         # Ensure directory exists
         self.excel_file_path.parent.mkdir(parents=True, exist_ok=True)
         
@@ -87,12 +90,12 @@ class ExcelReporter:
             # Define headers - comprehensive column structure
             headers = [
                 # Basic info
-                'scan_id', 'timestamp', 'scanner', 'symbol', 'timeframe',
+                'scan_id', 'timestamp', 'scanner', 'symbol', 'timeframe', 'asset_type', 'scanner_type',
                 # Price and volume
-                'price', 'volume',
+                'price', 'volume', 'avg_volume', 'volume_spike_ratio',
                 # Indicators
                 'ema_9', 'ema_21', 'ema_50', 'ema_100', 'ema_200',
-                'rsi', 'atr', 'volume_ma', 'vwap', 'stoch_k', 'stoch_d',
+                'rsi', 'atr', 'atr_percent', 'volume_ma', 'vwap', 'stoch_k', 'stoch_d',
                 # Signal info
                 'signal_detected', 'signal_type', 'entry_price', 'stop_loss',
                 'take_profit', 'risk_reward', 'strategy', 'confidence', 'market_bias',
@@ -122,6 +125,51 @@ class ExcelReporter:
         except Exception as e:
             logger.error(f"Failed to create Excel file: {e}")
             self.excel_disabled = True
+    
+    def _ensure_symbol_sheet(self, wb: Workbook, symbol: str) -> None:
+        """
+        Ensure a sheet exists for the given symbol.
+        
+        Args:
+            wb: Workbook object
+            symbol: Symbol name (e.g., 'BTC-USD')
+        """
+        # Clean symbol name for sheet name (Excel has 31 char limit and special char restrictions)
+        sheet_name = symbol.replace('/', '_').replace('^', '').replace('=', '')[:31]
+        
+        if sheet_name in self.symbol_sheets:
+            return
+        
+        # Check if sheet exists
+        if sheet_name not in wb.sheetnames:
+            ws = wb.create_sheet(title=sheet_name)
+            
+            # Define headers
+            headers = [
+                'scan_id', 'timestamp', 'timeframe', 'asset_type', 'scanner_type',
+                'price', 'volume', 'avg_volume', 'volume_spike_ratio',
+                'ema_9', 'ema_21', 'ema_50', 'ema_100', 'ema_200',
+                'rsi', 'atr', 'atr_percent',
+                'signal_detected', 'signal_type', 'entry_price', 'stop_loss',
+                'take_profit', 'risk_reward', 'strategy', 'confidence', 'market_bias'
+            ]
+            
+            # Write headers
+            for col_num, header in enumerate(headers, 1):
+                cell = ws.cell(row=1, column=col_num)
+                cell.value = header
+                cell.font = cell.font.copy(bold=True)
+            
+            # Auto-fit columns
+            for col_num in range(1, len(headers) + 1):
+                ws.column_dimensions[get_column_letter(col_num)].width = 15
+            
+            # Enable filters
+            ws.auto_filter.ref = ws.dimensions
+            
+            logger.info(f"Created sheet for symbol: {symbol}")
+        
+        self.symbol_sheets[sheet_name] = True
     
     def log_scan_result(self, scan_data: Dict[str, Any]) -> bool:
         """
@@ -188,6 +236,16 @@ class ExcelReporter:
                         return round(value, decimal_places)
                     return value
                 
+                # Calculate volatility metrics
+                atr = indicators.get('atr', 0)
+                price = scan_data.get('price', 0)
+                atr_percent = (atr / price * 100) if price > 0 and atr > 0 else 0
+                
+                # Calculate volume metrics
+                volume = scan_data.get('volume', 0)
+                volume_ma = indicators.get('volume_ma', 0)
+                volume_spike_ratio = (volume / volume_ma) if volume_ma > 0 else 0
+                
                 # Prepare row data with complete fields
                 row_data = [
                     # Basic info
@@ -196,9 +254,13 @@ class ExcelReporter:
                     scan_data.get('scanner', self.scanner_name),
                     scan_data.get('symbol', ''),
                     scan_data.get('timeframe', ''),
+                    scan_data.get('asset_type', ''),
+                    scan_data.get('scanner_type', ''),
                     # Price and volume
-                    format_value(scan_data.get('price')),
-                    format_value(scan_data.get('volume'), 0),
+                    format_value(price),
+                    format_value(volume, 0),
+                    format_value(volume_ma, 0),
+                    format_value(volume_spike_ratio, 2),
                     # Indicators
                     format_value(indicators.get('ema_9')),
                     format_value(indicators.get('ema_21')),
@@ -206,8 +268,9 @@ class ExcelReporter:
                     format_value(indicators.get('ema_100')),
                     format_value(indicators.get('ema_200')),
                     format_value(indicators.get('rsi'), 1),
-                    format_value(indicators.get('atr')),
-                    format_value(indicators.get('volume_ma'), 0),
+                    format_value(atr),
+                    format_value(atr_percent, 2),
+                    format_value(volume_ma, 0),
                     format_value(indicators.get('vwap')),
                     format_value(indicators.get('stoch_k'), 1),
                     format_value(indicators.get('stoch_d'), 1),
@@ -232,8 +295,47 @@ class ExcelReporter:
                     format_value(signal_details.get('pullback_depth'), 1) if signal_detected else 'N/A'
                 ]
                 
-                # Append row
+                # Append row to main sheet
                 ws.append(row_data)
+                
+                # Also append to symbol-specific sheet
+                symbol = scan_data.get('symbol', '')
+                if symbol:
+                    self._ensure_symbol_sheet(wb, symbol)
+                    sheet_name = symbol.replace('/', '_').replace('^', '').replace('=', '')[:31]
+                    symbol_ws = wb[sheet_name]
+                    
+                    # Prepare symbol-specific row (without scanner and symbol columns)
+                    symbol_row_data = [
+                        self.scan_count,
+                        scan_data.get('timestamp', datetime.now()).strftime('%Y-%m-%d %H:%M:%S'),
+                        scan_data.get('timeframe', ''),
+                        scan_data.get('asset_type', ''),
+                        scan_data.get('scanner_type', ''),
+                        format_value(price),
+                        format_value(volume, 0),
+                        format_value(volume_ma, 0),
+                        format_value(volume_spike_ratio, 2),
+                        format_value(indicators.get('ema_9')),
+                        format_value(indicators.get('ema_21')),
+                        format_value(indicators.get('ema_50')),
+                        format_value(indicators.get('ema_100')),
+                        format_value(indicators.get('ema_200')),
+                        format_value(indicators.get('rsi'), 1),
+                        format_value(atr),
+                        format_value(atr_percent, 2),
+                        signal_detected,
+                        scan_data.get('signal_type', '') if signal_detected else '',
+                        format_value(signal_details.get('entry_price')) if signal_detected else 'N/A',
+                        format_value(signal_details.get('stop_loss')) if signal_detected else 'N/A',
+                        format_value(signal_details.get('take_profit')) if signal_detected else 'N/A',
+                        format_value(signal_details.get('risk_reward'), 2) if signal_detected else 'N/A',
+                        signal_details.get('strategy', '') if signal_detected else '',
+                        format_value(signal_details.get('confidence'), 0) if signal_detected else 'N/A',
+                        signal_details.get('market_bias', '') if signal_detected else ''
+                    ]
+                    
+                    symbol_ws.append(symbol_row_data)
                 
                 # Save file
                 wb.save(self.excel_file_path)

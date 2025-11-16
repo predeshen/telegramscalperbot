@@ -121,44 +121,56 @@ echo "Installation Complete!"
 echo "=========================================="
 echo
 echo "Available services:"
+echo
+echo "Legacy Single-Symbol Scanners:"
 echo "  • btc-scalp-scanner.service"
 echo "  • btc-swing-scanner.service"
 echo "  • gold-scalp-scanner.service"
 echo "  • gold-swing-scanner.service"
 echo "  • us30-scalp-scanner.service"
 echo "  • us30-swing-scanner.service"
+echo "  • us30-momentum-scanner.service"
+echo
+echo "Multi-Symbol Scanners (Recommended):"
+echo "  • multi-crypto-scalp-scanner.service   (BTC, ETH, SOL - 1m/5m/15m)"
+echo "  • multi-crypto-swing-scanner.service   (BTC, ETH - 15m/1h/4h/1d)"
+echo "  • multi-fx-scalp-scanner.service       (EUR/USD, GBP/USD - 5m/15m/1h)"
+echo "  • multi-mixed-scanner.service          (BTC, ETH, EUR/USD - 15m/1h/4h)"
 echo
 echo "Next steps:"
 echo
-echo "1. Edit .env file with your Telegram chat ID:"
+echo "1. Edit .env file with your Telegram credentials:"
 echo "   nano $PROJECT_DIR/.env"
 echo
-echo "2. Enable services to start on boot:"
-echo "   sudo systemctl enable btc-scalp-scanner"
-echo "   sudo systemctl enable btc-swing-scanner"
-echo "   sudo systemctl enable gold-scalp-scanner"
-echo "   sudo systemctl enable gold-swing-scanner"
-echo "   sudo systemctl enable us30-scalp-scanner"
-echo "   sudo systemctl enable us30-swing-scanner"
+echo "2. Enable services to start on boot (choose legacy OR multi-symbol):"
+echo
+echo "   Legacy scanners:"
+echo "   sudo systemctl enable btc-scalp-scanner btc-swing-scanner gold-scalp-scanner gold-swing-scanner us30-scalp-scanner us30-swing-scanner us30-momentum-scanner"
+echo
+echo "   Multi-symbol scanners (recommended):"
+echo "   sudo systemctl enable multi-crypto-scalp-scanner multi-crypto-swing-scanner multi-fx-scalp-scanner multi-mixed-scanner"
 echo
 echo "3. Start services:"
-echo "   sudo systemctl start btc-scalp-scanner"
-echo "   sudo systemctl start btc-swing-scanner"
-echo "   sudo systemctl start gold-scalp-scanner"
-echo "   sudo systemctl start gold-swing-scanner"
-echo "   sudo systemctl start us30-scalp-scanner"
-echo "   sudo systemctl start us30-swing-scanner"
+echo
+echo "   Legacy scanners:"
+echo "   sudo systemctl start btc-scalp-scanner btc-swing-scanner gold-scalp-scanner gold-swing-scanner us30-scalp-scanner us30-swing-scanner us30-momentum-scanner"
+echo
+echo "   Multi-symbol scanners (recommended):"
+echo "   sudo systemctl start multi-crypto-scalp-scanner multi-crypto-swing-scanner multi-fx-scalp-scanner multi-mixed-scanner"
 echo
 echo "4. Check status:"
-echo "   sudo systemctl status btc-scalp-scanner"
+echo "   sudo systemctl status multi-crypto-scalp-scanner"
 echo
 echo "5. View logs:"
-echo "   sudo journalctl -u btc-scalp-scanner -f"
+echo "   sudo journalctl -u multi-crypto-scalp-scanner -f"
 echo "   OR"
-echo "   tail -f $PROJECT_DIR/logs/scanner.log"
+echo "   tail -f $PROJECT_DIR/logs/multi_crypto_scalp.log"
 echo
 echo "Quick commands:"
-echo "  Start all:  sudo systemctl start btc-*-scanner gold-*-scanner us30-*-scanner"
-echo "  Stop all:   sudo systemctl stop btc-*-scanner gold-*-scanner us30-*-scanner"
-echo "  Status all: sudo systemctl status btc-*-scanner gold-*-scanner us30-*-scanner"
+echo "  Start all legacy:  sudo systemctl start btc-*-scanner gold-*-scanner us30-*-scanner"
+echo "  Start all multi:   sudo systemctl start multi-*-scanner"
+echo "  Stop all:          sudo systemctl stop btc-*-scanner gold-*-scanner us30-*-scanner multi-*-scanner"
+echo "  Status all:        sudo systemctl status btc-*-scanner gold-*-scanner us30-*-scanner multi-*-scanner"
+echo
+echo "For more information, see: deployment/INSTALL_SERVICES.md"
 echo
