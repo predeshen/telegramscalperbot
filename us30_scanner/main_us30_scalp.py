@@ -83,18 +83,12 @@ def main():
     
     # Use HybridDataClient for US30 data with multiple fallback providers
     from src.hybrid_data_client import HybridDataClient
-    from src.data_source_config import DataSourceConfig
-    
-    # Configure data source for US30
-    data_config = DataSourceConfig()
-    data_config.symbol = config['exchange']['symbol']
-    data_config.timeframes = config['exchange']['timeframes']
     
     market_client = HybridDataClient(
-        config=data_config,
+        symbol=config['exchange']['symbol'],
+        timeframes=config['exchange']['timeframes'],
         buffer_size=200
     )
-    market_client.connect(config['exchange']['symbol'], config['exchange']['timeframes'])
     
     logger.info("Using HybridDataClient with multiple fallback providers for US30 data")
     

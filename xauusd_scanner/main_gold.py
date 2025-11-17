@@ -79,20 +79,14 @@ def main():
     
     # Use HybridDataClient for Gold data with multiple fallback providers
     from src.hybrid_data_client import HybridDataClient
-    from src.data_source_config import DataSourceConfig
     
     price_offset = config['exchange'].get('price_offset', 0.0)
     
-    # Configure data source for Gold
-    data_config = DataSourceConfig()
-    data_config.symbol = 'GC=F'  # Gold Futures
-    data_config.timeframes = config['exchange']['timeframes']
-    
     market_client = HybridDataClient(
-        config=data_config,
+        symbol='GC=F',  # Gold Futures
+        timeframes=config['exchange']['timeframes'],
         buffer_size=200
     )
-    market_client.connect('GC=F', config['exchange']['timeframes'])
     
     if price_offset != 0:
         logger.info(f"Price offset: {price_offset:+.2f} (adjusting futures to match spot prices)")
