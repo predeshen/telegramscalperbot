@@ -13,13 +13,14 @@ logger = logging.getLogger(__name__)
 
 
 # Default freshness thresholds for each timeframe (in seconds)
+# These are set to allow for real-world API delays while still catching truly stale data
 FRESHNESS_THRESHOLDS = {
-    '1m': 90,      # 1.5 minutes
-    '5m': 420,     # 7 minutes
-    '15m': 1200,   # 20 minutes
-    '1h': 5400,    # 90 minutes
-    '4h': 18000,   # 5 hours
-    '1d': 108000   # 30 hours
+    '1m': 300,     # 5 minutes (allows for API delays)
+    '5m': 600,     # 10 minutes
+    '15m': 1800,   # 30 minutes
+    '1h': 7200,    # 2 hours
+    '4h': 21600,   # 6 hours
+    '1d': 129600   # 36 hours
 }
 
 

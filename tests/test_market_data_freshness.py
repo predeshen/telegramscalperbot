@@ -49,14 +49,14 @@ class TestFreshnessThresholds:
     
     def test_freshness_thresholds_reasonable(self):
         """Test that thresholds are reasonable for each timeframe."""
-        # 1m threshold should be around 1.5 minutes
-        assert 60 < FRESHNESS_THRESHOLDS['1m'] < 180
+        # 1m threshold should allow for API delays (5 minutes)
+        assert 180 < FRESHNESS_THRESHOLDS['1m'] < 600
         
-        # 5m threshold should be around 7 minutes
-        assert 300 < FRESHNESS_THRESHOLDS['5m'] < 600
+        # 5m threshold should be around 10 minutes
+        assert 300 < FRESHNESS_THRESHOLDS['5m'] < 900
         
-        # 1h threshold should be around 90 minutes
-        assert 3600 < FRESHNESS_THRESHOLDS['1h'] < 7200
+        # 1h threshold should be around 2 hours
+        assert 3600 < FRESHNESS_THRESHOLDS['1h'] < 10800
 
 
 class TestValidateDataFreshness:
@@ -136,10 +136,10 @@ class TestValidateDataFreshness:
     
     def test_validate_data_at_threshold(self, market_client):
         """Test validation with data exactly at threshold."""
-        # Create DataFrame with timestamp exactly at 1m threshold (90 seconds)
+        # Create DataFrame with timestamp exactly at 1m threshold (300 seconds = 5 minutes)
         now = utc_now()
         df = pd.DataFrame({
-            'timestamp': [now - timedelta(seconds=90)],
+            'timestamp': [now - timedelta(seconds=300)],
             'open': [50000],
             'high': [50100],
             'low': [49900],
@@ -151,14 +151,14 @@ class TestValidateDataFreshness:
         
         # At exactly threshold, should be considered stale (age < threshold for fresh)
         assert is_fresh is False
-        assert 88 < age_seconds < 92
+        assert 298 < age_seconds < 302
     
     def test_validate_data_just_over_threshold(self, market_client):
         """Test validation with data just over threshold."""
-        # Create DataFrame with timestamp just over 1m threshold (91 seconds)
+        # Create DataFrame with timestamp just over 1m threshold (301 seconds)
         now = utc_now()
         df = pd.DataFrame({
-            'timestamp': [now - timedelta(seconds=91)],
+            'timestamp': [now - timedelta(seconds=301)],
             'open': [50000],
             'high': [50100],
             'low': [49900],
@@ -170,7 +170,7 @@ class TestValidateDataFreshness:
         
         # Just over threshold should be stale
         assert is_fresh is False
-        assert 89 < age_seconds < 93
+        assert 299 < age_seconds < 303
     
     def test_validate_empty_dataframe(self, market_client):
         """Test validation with empty DataFrame."""
