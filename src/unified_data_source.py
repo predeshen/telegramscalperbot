@@ -182,7 +182,12 @@ class UnifiedDataSource:
         # Fetch data with retry
         for attempt in range(self.retry_config.max_retries):
             try:
-                df = client.get_latest_candles(timeframe, count=limit)
+                result = client.get_latest_candles(timeframe, count=limit)
+                # Handle both tuple (new) and DataFrame (old) return types
+                if isinstance(result, tuple):
+                    df, _ = result
+                else:
+                    df = result
                 
                 if df.empty:
                     raise ValueError(f"Empty DataFrame returned for {symbol} {timeframe}")

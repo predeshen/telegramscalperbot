@@ -176,5 +176,5 @@ class TestIndicatorCalculator:
         })
         
         # Should raise ValueError - we always request 500 candles in production
-        with pytest.raises(ValueError, match="Data validation failed"):
+        with pytest.raises(ValueError, match="Insufficient data"):
             IndicatorCalculator.calculate_all_indicators(small_df)

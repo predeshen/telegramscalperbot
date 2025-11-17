@@ -60,7 +60,7 @@ class TestEndToEndSignalFlow:
         assert client.connect()
         
         # Fetch data
-        df = client.get_latest_candles('5m', 200)
+        df, _ = client.get_latest_candles('5m', 200)
         assert len(df) == 200
         assert 'close' in df.columns
         
@@ -93,7 +93,7 @@ class TestEndToEndSignalFlow:
         
         # Connect and fetch data
         assert client.connect()
-        df = client.get_latest_candles('5m', 200)
+        df, _ = client.get_latest_candles('5m', 200)
         
         # Calculate indicators
         df_with_indicators = calculator.calculate_all_indicators(df)
@@ -259,7 +259,7 @@ class TestEndToEndSignalFlow:
         
         # Execute pipeline
         assert client.connect()
-        df = client.get_latest_candles('5m', 200)
+        df, _ = client.get_latest_candles('5m', 200)
         df_with_indicators = calculator.calculate_all_indicators(df)
         signal = detector.detect_signals(df_with_indicators, '5m')
         

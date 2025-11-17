@@ -64,9 +64,9 @@ class TestSignalFilter:
     
     def test_no_conflict_same_direction(self, signal_filter):
         """Test that same direction signals don't conflict."""
-        # Add a 1d LONG signal
+        # Add a 1d LONG signal (20 minutes ago to avoid time-based suppression)
         signal_1d = Mock()
-        signal_1d.timestamp = datetime.now()
+        signal_1d.timestamp = datetime.now() - timedelta(minutes=20)
         signal_1d.timeframe = "1d"
         signal_1d.signal_type = "LONG"
         signal_1d.entry_price = 95000.0
@@ -130,9 +130,9 @@ class TestSignalFilter:
     
     def test_no_duplicate_different_price(self, signal_filter):
         """Test that signals with different prices are not duplicates."""
-        # Add first signal
+        # Add first signal (20 minutes ago to avoid time-based suppression)
         signal1 = Mock()
-        signal1.timestamp = datetime.now()
+        signal1.timestamp = datetime.now() - timedelta(minutes=20)
         signal1.timeframe = "15m"
         signal1.signal_type = "LONG"
         signal1.entry_price = 95000.0

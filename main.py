@@ -5,6 +5,10 @@ import time
 import threading
 from datetime import datetime
 import logging
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 from src.config_loader import ConfigLoader
 from src.market_data_client import MarketDataClient
@@ -195,6 +199,17 @@ class BTCScalpingScanner:
         # Trade tracker
         self.trade_tracker = TradeTracker(alerter=self.alerter)
         
+        # Data freshness tracking
+        self.last_fresh_data_time: dict[str, datetime] = {}
+        self.stale_data_count: dict[str, int] = {}
+        self.last_stale_alert_time: dict[str, datetime] = {}
+        
+        # Trade update tracking
+        self.last_trade_update_time: datetime | None = None
+        self.last_known_price: float | None = None
+        self.last_known_price_time: datetime | None = None
+        self.trade_update_failure_count: int = 0
+        
         # Excel reporter
         self.excel_reporter = None
         if hasattr(self.config, 'excel_reporting') and self.config.excel_reporting.get('enabled', False):
@@ -240,8 +255,11 @@ class BTCScalpingScanner:
             # Fetch initial historical data
             logger.info("Fetching initial candlestick data...")
             for timeframe in self.config.exchange.timeframes:
-                self.market_client.get_latest_candles(timeframe, 500)
+                _, _ = self.market_client.get_latest_candles(timeframe, 500, validate_freshness=False)
                 logger.info(f"Loaded {timeframe} data")
+                # Initialize state tracking
+                self.stale_data_count[timeframe] = 0
+                self.last_fresh_data_time[timeframe] = datetime.now()
             
             # Use polling mode instead of WebSocket for better compatibility
             logger.info("Using polling mode for data updates (more reliable across exchanges)...")
@@ -262,7 +280,7 @@ class BTCScalpingScanner:
             if self.alerter:
                 try:
                     # Get current price
-                    df = self.market_client.get_latest_candles(self.config.exchange.timeframes[0], 10)
+                    df, _ = self.market_client.get_latest_candles(self.config.exchange.timeframes[0], 10, validate_freshness=False)
                     current_price = df.iloc[-1]['close'] if not df.empty else 0
                     
                     # Get news status
@@ -316,19 +334,66 @@ class BTCScalpingScanner:
                         time.sleep(60)
                         continue
                     
-                    # Fetch latest data for each timeframe
+                    # Fetch latest data for each timeframe with freshness validation
                     for timeframe in self.config.exchange.timeframes:
                         try:
-                            df = self.market_client.get_latest_candles(timeframe, 500)
+                            df, is_fresh = self.market_client.get_latest_candles(timeframe, 500)
                             
                             if df.empty:
                                 logger.error(f"Received empty DataFrame for {timeframe} - skipping this iteration")
                                 continue
+                            
+                            # Check data freshness
+                            if not is_fresh:
+                                logger.warning(f"Stale data detected for {timeframe}, attempting retry...")
+                                
+                                # Increment stale counter
+                                self.stale_data_count[timeframe] = self.stale_data_count.get(timeframe, 0) + 1
+                                
+                                # Get data age for alert
+                                _, age_seconds = self.market_client.validate_data_freshness(df, timeframe)
+                                
+                                # Retry with backoff
+                                df, is_fresh = self._retry_fetch_with_backoff(timeframe)
+                                
+                                if not is_fresh or df is None:
+                                    logger.error(f"Failed to get fresh data for {timeframe} after retries")
+                                    
+                                    # Send stale data alert after 3 consecutive failures
+                                    self._send_stale_data_alert(timeframe, age_seconds)
+                                    
+                                    # Skip signal detection for this timeframe but continue loop
+                                    continue
+                                else:
+                                    # Fresh data obtained after retry
+                                    logger.info(f"Fresh data restored for {timeframe}")
+                                    
+                                    # Send recovery alert if data was stale for a while
+                                    if self.stale_data_count.get(timeframe, 0) >= 3:
+                                        last_fresh = self.last_fresh_data_time.get(timeframe)
+                                        if last_fresh:
+                                            stale_duration = (datetime.now() - last_fresh).total_seconds()
+                                            self._send_recovery_alert(timeframe, stale_duration)
+                                    
+                                    self.stale_data_count[timeframe] = 0
+                                    self.last_fresh_data_time[timeframe] = datetime.now()
+                            else:
+                                # Data is fresh
+                                # Check if we're recovering from stale data
+                                if self.stale_data_count.get(timeframe, 0) >= 3:
+                                    last_fresh = self.last_fresh_data_time.get(timeframe)
+                                    if last_fresh:
+                                        stale_duration = (datetime.now() - last_fresh).total_seconds()
+                                        self._send_recovery_alert(timeframe, stale_duration)
+                                
+                                self.stale_data_count[timeframe] = 0
+                                self.last_fresh_data_time[timeframe] = datetime.now()
+                            
                         except Exception as e:
                             logger.error(f"Failed to fetch data for {timeframe}: {e}")
                             continue
                         
-                        # Process data (we know it's not empty here)
+                        # Process data (we know it's not empty and fresh here)
                             # Update health monitor
                             self.health_monitor.update_data_timestamp(df.iloc[-1]['timestamp'])
                             
@@ -413,27 +478,50 @@ class BTCScalpingScanner:
                                         rate = self.alerter.email_alerter.get_success_rate()
                                         self.health_monitor.set_email_success_rate(rate)
                                 
-                                # Update active trades with current price and indicators
-                                if not data_with_indicators.empty:
-                                    last_row = data_with_indicators.iloc[-1]
-                                    current_price = last_row['close']
-                                    
-                                    # Prepare indicators for TP extension logic
+                    
+                    # ALWAYS update active trades (independent of signal detection)
+                    # This ensures TP/SL notifications are sent even if signal detection fails
+                    if self.trade_tracker.get_active_count() > 0:
+                        current_price = self._get_current_price_for_trades()
+                        
+                        if current_price:
+                            # Get indicators if available
+                            indicators = None
+                            try:
+                                primary_tf = self.config.exchange.timeframes[0]
+                                df, _ = self.market_client.get_latest_candles(primary_tf, 10, validate_freshness=False)
+                                if not df.empty:
+                                    last_row = df.iloc[-1]
                                     indicators = {
                                         'rsi': last_row.get('rsi', 50),
-                                        'prev_rsi': data_with_indicators.iloc[-2].get('rsi', 50) if len(data_with_indicators) > 1 else 50,
+                                        'prev_rsi': df.iloc[-2].get('rsi', 50) if len(df) > 1 else 50,
                                         'adx': last_row.get('adx', 0),
-                                        'volume_ratio': last_row['volume'] / last_row['volume_ma'] if last_row.get('volume_ma', 0) > 0 else 0
+                                        'volume_ratio': last_row['volume'] / last_row.get('volume_ma', 1) if last_row.get('volume_ma', 0) > 0 else 0
                                     }
-                                    
-                                    self.trade_tracker.update_trades(current_price, indicators)
+                            except Exception as e:
+                                logger.warning(f"Failed to get indicators for trade updates: {e}")
+                            
+                            # Update trades
+                            self.trade_tracker.update_trades(current_price, indicators)
+                            self.last_trade_update_time = datetime.now()
+                            self.trade_update_failure_count = 0
+                        else:
+                            # Failed to get price
+                            self.trade_update_failure_count += 1
+                            logger.error(
+                                f"Cannot update trades: no valid price available "
+                                f"(failures: {self.trade_update_failure_count})"
+                            )
+                            
+                            # Send alert after 3 consecutive failures
+                            self._send_trade_update_failure_alert()
                     
                     # Check if it's time for heartbeat message (every 15 minutes)
                     current_time = time.time()
                     if current_time - last_heartbeat >= heartbeat_interval:
                         try:
                             # Get latest data for heartbeat
-                            df = self.market_client.get_latest_candles(self.config.exchange.timeframes[0], 10)
+                            df, _ = self.market_client.get_latest_candles(self.config.exchange.timeframes[0], 10, validate_freshness=False)
                             if not df.empty:
                                 last_candle = df.iloc[-1]
                                 heartbeat_msg = (
@@ -466,6 +554,203 @@ class BTCScalpingScanner:
             raise
         finally:
             self.stop()
+    
+    def _retry_fetch_with_backoff(
+        self, 
+        timeframe: str, 
+        max_retries: int = 3
+    ) -> tuple:
+        """
+        Attempt to fetch fresh data with exponential backoff.
+        
+        Args:
+            timeframe: Timeframe to fetch
+            max_retries: Maximum number of retry attempts
+            
+        Returns:
+            Tuple of (DataFrame or None, is_fresh: bool)
+        """
+        import pandas as pd
+        
+        backoff_delays = [5, 10, 30]  # seconds
+        
+        for attempt in range(max_retries):
+            if attempt > 0:
+                delay = backoff_delays[min(attempt - 1, len(backoff_delays) - 1)]
+                logger.info(f"Retry attempt {attempt + 1}/{max_retries} for {timeframe} in {delay}s...")
+                time.sleep(delay)
+            
+            try:
+                df, is_fresh = self.market_client.get_latest_candles(timeframe, 500)
+                
+                if is_fresh:
+                    logger.info(f"Successfully fetched fresh data for {timeframe} on attempt {attempt + 1}")
+                    return df, True
+                else:
+                    logger.warning(f"Fetched data for {timeframe} is still stale on attempt {attempt + 1}")
+                    
+            except Exception as e:
+                logger.error(f"Failed to fetch data for {timeframe} on attempt {attempt + 1}: {e}")
+        
+        logger.error(f"All {max_retries} retry attempts failed for {timeframe}")
+        return None, False
+    
+    def _get_current_price_for_trades(self) -> float | None:
+        """
+        Get the most recent price for trade updates, using fallback strategies.
+        
+        Priority:
+        1. Latest candle from primary timeframe (if fresh)
+        2. Cached price from last successful fetch (if < 5 min old)
+        3. None (skip trade updates)
+        
+        Returns:
+            Current price or None if no valid price available
+        """
+        # Try to get fresh price from primary timeframe
+        try:
+            primary_tf = self.config.exchange.timeframes[0]
+            df, is_fresh = self.market_client.get_latest_candles(primary_tf, 10)
+            
+            if not df.empty and is_fresh:
+                current_price = df.iloc[-1]['close']
+                # Update cache
+                self.last_known_price = current_price
+                self.last_known_price_time = datetime.now()
+                logger.debug(f"Using live price for trade updates: ${current_price:.2f}")
+                return current_price
+                
+        except Exception as e:
+            logger.warning(f"Failed to fetch live price for trade updates: {e}")
+        
+        # Fallback to cached price if recent enough
+        if self.last_known_price and self.last_known_price_time:
+            cache_age = (datetime.now() - self.last_known_price_time).total_seconds()
+            
+            if cache_age < 300:  # 5 minutes
+                logger.warning(
+                    f"Using cached price for trade updates: ${self.last_known_price:.2f} "
+                    f"(age: {cache_age:.0f}s)"
+                )
+                return self.last_known_price
+            else:
+                logger.error(
+                    f"Cached price too old ({cache_age:.0f}s), cannot update trades"
+                )
+        
+        logger.error("No valid price available for trade updates")
+        return None
+    
+    def _send_stale_data_alert(self, timeframe: str, age_seconds: float) -> None:
+        """
+        Send alert when data remains stale after retries.
+        
+        Args:
+            timeframe: Timeframe with stale data
+            age_seconds: Age of the stale data in seconds
+        """
+        # Check if we should send alert (3+ consecutive stale occurrences)
+        if self.stale_data_count.get(timeframe, 0) < 3:
+            return
+        
+        # Check deduplication (no alert within last 15 minutes)
+        last_alert = self.last_stale_alert_time.get(timeframe)
+        if last_alert:
+            time_since_alert = (datetime.now() - last_alert).total_seconds()
+            if time_since_alert < 900:  # 15 minutes
+                logger.debug(f"Stale data alert suppressed for {timeframe} (last alert {time_since_alert:.0f}s ago)")
+                return
+        
+        # Get last fresh time
+        last_fresh = self.last_fresh_data_time.get(timeframe)
+        last_fresh_str = last_fresh.strftime('%H:%M:%S UTC') if last_fresh else 'Unknown'
+        
+        # Get threshold for this timeframe
+        from src.market_data_client import FRESHNESS_THRESHOLDS
+        threshold = FRESHNESS_THRESHOLDS.get(timeframe, 300)
+        
+        message = f"""
+⚠️ *STALE DATA ALERT*
+
+*Timeframe:* {timeframe}
+*Data Age:* {age_seconds / 60:.1f} minutes
+*Last Fresh:* {last_fresh_str}
+*Threshold:* {threshold} seconds
+
+The scanner is receiving outdated market data.
+Trade monitoring may be delayed.
+
+*Actions:*
+• Check exchange API status
+• Verify internet connection
+• Scanner will continue retrying
+
+⏰ {datetime.now().strftime('%H:%M:%S UTC')}
+"""
+        
+        try:
+            self.alerter.send_message(message)
+            self.last_stale_alert_time[timeframe] = datetime.now()
+            logger.info(f"Sent stale data alert for {timeframe}")
+        except Exception as e:
+            logger.error(f"Failed to send stale data alert: {e}")
+    
+    def _send_trade_update_failure_alert(self) -> None:
+        """Send alert when trade updates fail repeatedly."""
+        # Only send after 3 consecutive failures
+        if self.trade_update_failure_count < 3:
+            return
+        
+        last_update_str = self.last_trade_update_time.strftime('%H:%M:%S UTC') if self.last_trade_update_time else 'Never'
+        active_count = self.trade_tracker.get_active_count()
+        
+        message = f"""
+🚨 *TRADE UPDATE FAILURE*
+
+Cannot update active trades due to stale data.
+TP/SL notifications may be delayed.
+
+*Last Successful Update:* {last_update_str}
+*Active Trades:* {active_count}
+*Failure Count:* {self.trade_update_failure_count}
+
+The scanner is attempting to recover.
+
+⏰ {datetime.now().strftime('%H:%M:%S UTC')}
+"""
+        
+        try:
+            self.alerter.send_message(message)
+            logger.info("Sent trade update failure alert")
+            # Reset counter after sending alert to avoid spam
+            self.trade_update_failure_count = 0
+        except Exception as e:
+            logger.error(f"Failed to send trade update failure alert: {e}")
+    
+    def _send_recovery_alert(self, timeframe: str, stale_duration_seconds: float) -> None:
+        """
+        Send alert when data freshness is restored.
+        
+        Args:
+            timeframe: Timeframe that recovered
+            stale_duration_seconds: How long data was stale
+        """
+        message = f"""
+✅ *DATA FRESHNESS RESTORED*
+
+*Timeframe:* {timeframe}
+Fresh data received after {stale_duration_seconds / 60:.1f} minutes
+
+Trade monitoring has resumed normally.
+
+⏰ {datetime.now().strftime('%H:%M:%S UTC')}
+"""
+        
+        try:
+            self.alerter.send_message(message)
+            logger.info(f"Sent recovery alert for {timeframe}")
+        except Exception as e:
+            logger.error(f"Failed to send recovery alert: {e}")
     
     def stop(self) -> None:
         """Stop the scanner application gracefully."""

@@ -89,19 +89,23 @@ class TradeTracker:
         logger.info(f"Initialized Enhanced TradeTracker (grace_period={grace_period_minutes}m, "
                    f"min_profit_crypto={min_profit_threshold_crypto}%, min_profit_fx={min_profit_threshold_fx}%)")
     
-    def add_trade(self, signal: Signal, symbol: Optional[str] = None) -> None:
+    def add_trade(self, signal: Signal, symbol: Optional[str] = None) -> str:
         """
         Add a new trade to tracking (per-symbol).
         
         Args:
             signal: Signal that was just generated
             symbol: Trading symbol (optional, extracted from signal if not provided)
+            
+        Returns:
+            trade_id: Unique identifier for the trade
         """
         # Extract symbol from signal or use provided
         if symbol is None:
             symbol = getattr(signal, 'symbol', 'BTC/USD')
         
-        trade_id = f"{symbol}_{signal.signal_type}_{signal.timestamp.strftime('%Y%m%d_%H%M%S')}"
+        # Generate unique trade ID with microseconds for uniqueness
+        trade_id = f"{symbol}_{signal.signal_type}_{signal.timestamp.strftime('%Y%m%d_%H%M%S_%f')}"
         
         trade_status = TradeStatus(
             signal=signal,
@@ -113,6 +117,9 @@ class TradeTracker:
         
         self.active_trades[trade_id] = trade_status
         logger.info(f"Added trade to tracking: {trade_id} at ${signal.entry_price:.2f}")
+        logger.debug(f"Trade ID generated with microseconds: {trade_id}")
+        
+        return trade_id
     
     def update_trades(self, current_price: float, indicators: Optional[Dict] = None) -> None:
         """
@@ -122,6 +129,10 @@ class TradeTracker:
             current_price: Current market price
             indicators: Optional dict with current RSI, ADX, volume_ratio for TP extension logic
         """
+        # Log active trade count for debugging
+        if self.active_trades:
+            logger.debug(f"Updating {len(self.active_trades)} active trade(s) with price ${current_price:.2f}")
+        
         for trade_id, trade in list(self.active_trades.items()):
             signal = trade.signal
             
@@ -134,33 +145,35 @@ class TradeTracker:
             # Use extended TP if available
             target_price = trade.extended_tp if trade.extended_tp else signal.take_profit
             
-            # Check if trade should be closed
+            # PRIORITY 1: Check if trade should be closed (TP/SL)
+            # These checks come first to ensure immediate closure and prevent other notifications
             if self._check_target_hit_extended(signal, current_price, trade, target_price):
                 self._close_trade(trade_id, "TARGET", current_price)
-                continue
+                continue  # Skip all other checks for this trade
             
             if self._check_stop_hit(signal, current_price, trade):
                 self._close_trade(trade_id, "STOP", current_price)
-                continue
+                continue  # Skip all other checks for this trade
             
-            # Check for TP extension opportunity (before hitting original TP)
+            # PRIORITY 2: Check for TP extension opportunity (before hitting original TP)
             if not trade.tp_extension_notified and indicators:
                 if self._should_extend_tp(signal, current_price, trade, indicators):
                     self._send_tp_extension_alert(signal, current_price, trade, indicators)
                     trade.tp_extension_notified = True
             
-            # Check for momentum reversal (EXIT signal)
+            # PRIORITY 3: Check for momentum reversal (EXIT signal)
             if indicators and not trade.momentum_reversal_notified:
                 if self._check_momentum_reversal(signal, current_price, trade, indicators):
                     self._send_momentum_reversal_alert(signal, current_price, indicators, trade)
                     trade.momentum_reversal_notified = True
             
-            # Check for management updates
+            # PRIORITY 4: Check for management updates (breakeven)
             if not trade.breakeven_notified:
                 if self._check_breakeven_reached(signal, current_price):
                     self._send_breakeven_update(signal, current_price, trade)
                     trade.breakeven_notified = True
             
+            # PRIORITY 5: Check for stop warning (risk alert)
             if not trade.stop_warning_sent:
                 if self._check_stop_approaching(signal, current_price):
                     self._send_stop_warning(signal, current_price)
@@ -176,16 +189,32 @@ class TradeTracker:
     def _check_target_hit_extended(self, signal: Signal, current_price: float, trade: TradeStatus, target_price: float) -> bool:
         """Check if take-profit target (original or extended) was hit."""
         if signal.signal_type == "LONG":
-            return current_price >= target_price
+            result = current_price >= target_price
+            logger.debug(f"TP check LONG: current=${current_price:.2f} >= target=${target_price:.2f} → {result}")
+            if result:
+                logger.info(f"Take-profit HIT for LONG trade: ${current_price:.2f} >= ${target_price:.2f}")
+            return result
         else:
-            return current_price <= target_price
+            result = current_price <= target_price
+            logger.debug(f"TP check SHORT: current=${current_price:.2f} <= target=${target_price:.2f} → {result}")
+            if result:
+                logger.info(f"Take-profit HIT for SHORT trade: ${current_price:.2f} <= ${target_price:.2f}")
+            return result
     
     def _check_stop_hit(self, signal: Signal, current_price: float, trade: TradeStatus) -> bool:
         """Check if stop-loss was hit."""
         if signal.signal_type == "LONG":
-            return current_price <= signal.stop_loss
+            result = current_price <= signal.stop_loss
+            logger.debug(f"SL check LONG: current=${current_price:.2f} <= stop=${signal.stop_loss:.2f} → {result}")
+            if result:
+                logger.info(f"Stop-loss HIT for LONG trade: ${current_price:.2f} <= ${signal.stop_loss:.2f}")
+            return result
         else:
-            return current_price >= signal.stop_loss
+            result = current_price >= signal.stop_loss
+            logger.debug(f"SL check SHORT: current=${current_price:.2f} >= stop=${signal.stop_loss:.2f} → {result}")
+            if result:
+                logger.info(f"Stop-loss HIT for SHORT trade: ${current_price:.2f} >= ${signal.stop_loss:.2f}")
+            return result
     
     def _check_breakeven_reached(self, signal: Signal, current_price: float) -> bool:
         """Check if price reached 50% to target (breakeven level)."""
@@ -496,6 +525,23 @@ This is a runner! The trend is strong and likely to continue past your original 
         self.alerter.send_message(message)
         logger.info(f"Sent TP extension alert for {signal.signal_type} trade: ${signal.take_profit:,.2f} -> ${extended_tp:,.2f}")
     
+    def _validate_trade_exists(self, trade_id: str, operation: str) -> bool:
+        """
+        Validate that a trade exists before performing operations.
+        
+        Args:
+            trade_id: Trade identifier
+            operation: Description of operation being attempted
+            
+        Returns:
+            True if trade exists, False otherwise (with error log)
+        """
+        if trade_id not in self.active_trades:
+            logger.error(f"Trade {trade_id} not found in active trades. Operation: {operation}")
+            logger.debug(f"Active trades: {list(self.active_trades.keys())}")
+            return False
+        return True
+    
     def _send_breakeven_update(self, signal: Signal, current_price: float, trade: TradeStatus) -> None:
         """Send notification to move stop to breakeven."""
         breakeven = signal.get_breakeven_price()
@@ -555,6 +601,10 @@ Price is moving against your position. Prepare for potential stop-out.
             reason: "TARGET" or "STOP"
             current_price: Price at close
         """
+        # Validate trade exists
+        if not self._validate_trade_exists(trade_id, f"close_trade (reason: {reason})"):
+            return
+        
         trade = self.active_trades[trade_id]
         signal = trade.signal
         
@@ -566,11 +616,17 @@ Price is moving against your position. Prepare for potential stop-out.
         
         pnl_percent = (pnl_points / signal.entry_price) * 100
         
+        # Check if TP notification already sent (prevent duplicates)
+        if reason == "TARGET" and trade.target_notified:
+            logger.warning(f"Duplicate TP notification prevented for trade {trade_id}")
+            return
+        
         # Determine emoji and message
         if reason == "TARGET":
             emoji = "🎉"
             status = "TARGET HIT - WINNER!"
             trade.status = "CLOSED_TP"
+            trade.target_notified = True  # Mark TP notification as sent
         else:
             emoji = "🛑"
             status = "STOP-LOSS HIT"
@@ -602,15 +658,20 @@ R:R Achieved: {rr_achieved:.2f}
 """
         
         self.alerter.send_message(message)
+        
+        # Enhanced logging with full trade details
         logger.info(f"Closed trade {trade_id}: {reason}, P&L: {pnl_percent:.2f}%")
+        logger.info(f"  Entry: ${signal.entry_price:.2f}, Exit: ${current_price:.2f}, Hold time: {minutes}min, R:R: {rr_achieved:.2f}")
+        logger.debug(f"  Trade details: {signal.signal_type}, Symbol: {signal.symbol}, Status: {trade.status}")
         
         # Record trade result for win rate tracking
         is_win = (reason == "TARGET")
         self._record_trade_result(signal.symbol, is_win, pnl_percent)
         
-        # Move to closed trades
+        # Move to closed trades and remove from active
         self.closed_trades.append(trade)
         del self.active_trades[trade_id]
+        logger.debug(f"Trade {trade_id} removed from active_trades. Active count: {len(self.active_trades)}")
     
     def get_active_count(self) -> int:
         """Get number of active trades."""
@@ -679,3 +740,64 @@ R:R Achieved: {rr_achieved:.2f}
             return +1  # Increase min_confidence (more strict)
         else:
             return 0  # No adjustment
+    
+    def debug_active_trades(self) -> str:
+        """
+        Return formatted string of all active trades for debugging.
+        
+        Returns:
+            Formatted string with active trade details
+        """
+        if not self.active_trades:
+            return "No active trades"
+        
+        lines = [f"Active Trades ({len(self.active_trades)}):"]
+        for trade_id, trade in self.active_trades.items():
+            signal = trade.signal
+            lines.append(f"  {trade_id}:")
+            lines.append(f"    Type: {signal.signal_type}, Entry: ${signal.entry_price:.2f}")
+            lines.append(f"    TP: ${signal.take_profit:.2f}, SL: ${signal.stop_loss:.2f}")
+            lines.append(f"    Status: {trade.status}, Entry Time: {trade.entry_time.strftime('%Y-%m-%d %H:%M:%S')}")
+            lines.append(f"    Notifications: BE={trade.breakeven_notified}, TP={trade.target_notified}, SW={trade.stop_warning_sent}")
+        
+        return "\n".join(lines)
+    
+    def get_trade_status(self, trade_id: str) -> Optional[Dict]:
+        """
+        Get current status of a trade for debugging.
+        
+        Args:
+            trade_id: Trade identifier
+            
+        Returns:
+            Dict with trade details or None if not found
+        """
+        if trade_id not in self.active_trades:
+            return None
+        
+        trade = self.active_trades[trade_id]
+        signal = trade.signal
+        
+        return {
+            'trade_id': trade_id,
+            'signal_type': signal.signal_type,
+            'symbol': signal.symbol,
+            'entry_price': signal.entry_price,
+            'stop_loss': signal.stop_loss,
+            'take_profit': signal.take_profit,
+            'extended_tp': trade.extended_tp,
+            'entry_time': trade.entry_time.isoformat(),
+            'status': trade.status,
+            'notifications': {
+                'breakeven': trade.breakeven_notified,
+                'target': trade.target_notified,
+                'stop_warning': trade.stop_warning_sent,
+                'tp_extension': trade.tp_extension_notified,
+                'momentum_reversal': trade.momentum_reversal_notified
+            },
+            'price_tracking': {
+                'highest_price': trade.highest_price,
+                'lowest_price': trade.lowest_price,
+                'peak_profit_percent': trade.peak_profit_percent
+            }
+        }

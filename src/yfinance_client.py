@@ -103,16 +103,17 @@ class YFinanceClient:
         """Check if client is connected."""
         return self._connected
     
-    def get_latest_candles(self, timeframe: str, count: int = 500) -> pd.DataFrame:
+    def get_latest_candles(self, timeframe: str, count: int = 500, validate_freshness: bool = True) -> tuple:
         """
-        Fetch historical candlesticks from Yahoo Finance with validation.
+        Fetch historical candlesticks from Yahoo Finance with optional freshness validation.
         
         Args:
             timeframe: Timeframe string (e.g., '1m', '5m', '1h', '1d')
             count: Number of candles to fetch (default: 500)
+            validate_freshness: Whether to validate data freshness (default: True)
             
         Returns:
-            DataFrame with OHLCV data and timestamp
+            Tuple of (DataFrame with OHLCV data, is_fresh: bool)
             
         Raises:
             RuntimeError: If not connected
@@ -192,8 +193,34 @@ class YFinanceClient:
                 for _, row in df.iterrows():
                     self.buffers[timeframe].append(row.to_dict())
             
-            logger.info(f"Fetched {len(df)} candles for {timeframe} (requested: {count}, period: {period})")
-            return df
+            # Validate freshness if requested
+            is_fresh = True
+            if validate_freshness:
+                # Import freshness validation from market_data_client
+                from src.market_data_client import FRESHNESS_THRESHOLDS
+                from datetime import datetime, timezone
+                
+                if not df.empty:
+                    latest_timestamp = df.iloc[-1]['timestamp']
+                    
+                    # Ensure timezone-naive for comparison
+                    if latest_timestamp.tzinfo is not None:
+                        latest_timestamp = latest_timestamp.replace(tzinfo=None)
+                    
+                    current_time = datetime.now(timezone.utc).replace(tzinfo=None)
+                    age_seconds = (current_time - latest_timestamp).total_seconds()
+                    
+                    threshold = FRESHNESS_THRESHOLDS.get(timeframe, 300)
+                    is_fresh = age_seconds < threshold
+                    
+                    if not is_fresh:
+                        logger.warning(
+                            f"Stale data detected for {timeframe}: "
+                            f"age={age_seconds:.1f}s exceeds threshold={threshold}s"
+                        )
+            
+            logger.info(f"Fetched {len(df)} candles for {timeframe} (requested: {count}, period: {period}, fresh: {is_fresh})")
+            return df, is_fresh
             
         except Exception as e:
             logger.error(f"Failed to fetch candles for {timeframe}: {e}")

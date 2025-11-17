@@ -216,36 +216,55 @@ class HybridDataClient:
         
         return True
     
-    def get_latest_candles(self, timeframe: str, count: int = 100) -> pd.DataFrame:
+    def get_latest_candles(self, timeframe: str, count: int = 100, validate_freshness: bool = True) -> tuple:
         """
-        Get latest candles with automatic fallback
+        Get latest candles with automatic fallback and optional freshness validation
         
         Args:
             timeframe: Timeframe (e.g., '5m', '1h')
             count: Number of candles
+            validate_freshness: Whether to validate data freshness (default: True)
             
         Returns:
-            DataFrame with OHLCV data
+            Tuple of (DataFrame with OHLCV data, is_fresh: bool)
         """
         if not self.client:
             logger.error("No client initialized")
-            return pd.DataFrame()
+            return pd.DataFrame(), False
         
         try:
-            data = self.client.get_latest_candles(timeframe, count)
+            # Check if underlying client supports freshness validation
+            if hasattr(self.client, 'get_latest_candles'):
+                # Try to call with validate_freshness parameter
+                try:
+                    result = self.client.get_latest_candles(timeframe, count, validate_freshness=validate_freshness)
+                    # If it returns a tuple, use it
+                    if isinstance(result, tuple):
+                        data, is_fresh = result
+                    else:
+                        # Old-style client that returns just DataFrame
+                        data = result
+                        is_fresh = True  # Assume fresh if no validation
+                except TypeError:
+                    # Client doesn't support validate_freshness parameter
+                    data = self.client.get_latest_candles(timeframe, count)
+                    is_fresh = True  # Assume fresh if no validation
+            else:
+                logger.error(f"Client {self.client_type} doesn't have get_latest_candles method")
+                return pd.DataFrame(), False
             
             # If data is empty, try fallback
             if data.empty:
                 logger.warning(f"{self.client_type} returned empty data, trying fallback...")
-                return self._try_fallback_data(timeframe, count)
+                return self._try_fallback_data(timeframe, count, validate_freshness)
             
-            return data
+            return data, is_fresh
             
         except Exception as e:
             logger.error(f"Error fetching data from {self.client_type}: {e}")
-            return self._try_fallback_data(timeframe, count)
+            return self._try_fallback_data(timeframe, count, validate_freshness)
     
-    def _try_fallback_data(self, timeframe: str, count: int) -> pd.DataFrame:
+    def _try_fallback_data(self, timeframe: str, count: int, validate_freshness: bool = True) -> tuple:
         """Try to get data from fallback provider"""
         remaining_providers = [p for p in self.PROVIDER_PRIORITY.get(self.asset_type, ['yfinance']) 
                              if p not in self.providers_tried]
@@ -254,13 +273,23 @@ class HybridDataClient:
             logger.info(f"Trying fallback provider: {provider}")
             if self._try_provider(provider):
                 if self.client.connect():
-                    data = self.client.get_latest_candles(timeframe, count)
+                    try:
+                        result = self.client.get_latest_candles(timeframe, count, validate_freshness=validate_freshness)
+                        if isinstance(result, tuple):
+                            data, is_fresh = result
+                        else:
+                            data = result
+                            is_fresh = True
+                    except TypeError:
+                        data = self.client.get_latest_candles(timeframe, count)
+                        is_fresh = True
+                    
                     if not data.empty:
                         logger.info(f"Successfully got data from fallback provider {provider}")
-                        return data
+                        return data, is_fresh
         
         logger.error("All fallback providers failed")
-        return pd.DataFrame()
+        return pd.DataFrame(), False
     
     def get_current_price(self) -> Optional[float]:
         """Get current price"""
@@ -280,6 +309,58 @@ class HybridDataClient:
         except Exception as e:
             logger.error(f"Error getting current price: {e}")
             return None
+    
+    def validate_data_freshness(self, df: pd.DataFrame, timeframe: str, max_age_seconds: int = None) -> tuple:
+        """
+        Validate data freshness by delegating to underlying client or using default logic.
+        
+        Args:
+            df: DataFrame with candlestick data
+            timeframe: Timeframe string
+            max_age_seconds: Maximum acceptable age in seconds (optional)
+            
+        Returns:
+            Tuple of (is_fresh: bool, age_seconds: float)
+        """
+        # Try to use underlying client's validation if available
+        if self.client and hasattr(self.client, 'validate_data_freshness'):
+            return self.client.validate_data_freshness(df, timeframe, max_age_seconds)
+        
+        # Fallback: use default validation logic from market_data_client
+        from src.market_data_client import FRESHNESS_THRESHOLDS
+        from datetime import datetime, timezone
+        
+        if df.empty:
+            logger.warning(f"Cannot validate freshness: DataFrame is empty for {timeframe}")
+            return False, float('inf')
+        
+        # Get the latest candle timestamp
+        latest_timestamp = df.iloc[-1]['timestamp']
+        
+        # Convert to datetime if needed
+        if not isinstance(latest_timestamp, datetime):
+            try:
+                latest_timestamp = pd.to_datetime(latest_timestamp)
+            except Exception as e:
+                logger.error(f"Failed to convert timestamp to datetime: {e}")
+                return False, float('inf')
+        
+        # Ensure timezone-naive for comparison
+        if latest_timestamp.tzinfo is not None:
+            latest_timestamp = latest_timestamp.replace(tzinfo=None)
+        
+        current_time = datetime.now(timezone.utc).replace(tzinfo=None)
+        age_seconds = (current_time - latest_timestamp).total_seconds()
+        
+        # Determine threshold
+        if max_age_seconds is None:
+            threshold = FRESHNESS_THRESHOLDS.get(timeframe, 300)
+        else:
+            threshold = max_age_seconds
+        
+        is_fresh = age_seconds < threshold
+        
+        return is_fresh, age_seconds
     
     def get_client_info(self) -> dict:
         """Get information about the active client"""

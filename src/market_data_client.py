@@ -12,6 +12,17 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+# Default freshness thresholds for each timeframe (in seconds)
+FRESHNESS_THRESHOLDS = {
+    '1m': 90,      # 1.5 minutes
+    '5m': 420,     # 7 minutes
+    '15m': 1200,   # 20 minutes
+    '1h': 5400,    # 90 minutes
+    '4h': 18000,   # 5 hours
+    '1d': 108000   # 30 hours
+}
+
+
 class MarketDataClient:
     """
     Manages connection to cryptocurrency exchange and maintains real-time candlestick buffers.
@@ -86,16 +97,92 @@ class MarketDataClient:
         """Check if client is connected to exchange."""
         return self._connected
     
-    def get_latest_candles(self, timeframe: str, count: int = 500) -> pd.DataFrame:
+    def validate_data_freshness(
+        self, 
+        df: pd.DataFrame, 
+        timeframe: str, 
+        max_age_seconds: Optional[int] = None
+    ) -> tuple[bool, float]:
         """
-        Fetch historical candlesticks from exchange via REST API with validation.
+        Validate that the latest candle is fresh enough for the given timeframe.
+        
+        Args:
+            df: DataFrame with candlestick data
+            timeframe: Timeframe string (e.g., '1m', '5m')
+            max_age_seconds: Maximum acceptable age in seconds (optional, auto-calculated if None)
+            
+        Returns:
+            Tuple of (is_fresh: bool, age_seconds: float)
+        """
+        if df.empty:
+            logger.warning(f"Cannot validate freshness: DataFrame is empty for {timeframe}")
+            return False, float('inf')
+        
+        # Get the latest candle timestamp
+        latest_timestamp = df.iloc[-1]['timestamp']
+        
+        # Convert to datetime if needed
+        if not isinstance(latest_timestamp, datetime):
+            try:
+                latest_timestamp = pd.to_datetime(latest_timestamp)
+            except Exception as e:
+                logger.error(f"Failed to convert timestamp to datetime: {e}")
+                return False, float('inf')
+        
+        # Calculate age in seconds
+        # pd.to_datetime with unit='ms' creates UTC timestamps
+        # So we need to use UTC time for comparison
+        from datetime import timezone
+        current_time = datetime.now(timezone.utc)
+        
+        # Ensure both timestamps are timezone-naive for comparison
+        if latest_timestamp.tzinfo is not None:
+            latest_timestamp = latest_timestamp.replace(tzinfo=None)
+        if current_time.tzinfo is not None:
+            current_time = current_time.replace(tzinfo=None)
+        
+        age_seconds = (current_time - latest_timestamp).total_seconds()
+        
+        # Determine threshold
+        if max_age_seconds is None:
+            # Use default threshold for timeframe
+            threshold = FRESHNESS_THRESHOLDS.get(timeframe, 300)  # Default 5 minutes
+        else:
+            threshold = max_age_seconds
+        
+        is_fresh = age_seconds < threshold
+        
+        # Log freshness check result
+        logger.debug(
+            f"Freshness check for {timeframe}: age={age_seconds:.1f}s, "
+            f"threshold={threshold}s, fresh={is_fresh}"
+        )
+        
+        if not is_fresh:
+            logger.warning(
+                f"Stale data detected for {timeframe}: "
+                f"age={age_seconds:.1f}s exceeds threshold={threshold}s"
+            )
+        
+        return is_fresh, age_seconds
+    
+    def get_latest_candles(
+        self, 
+        timeframe: str, 
+        count: int = 500,
+        validate_freshness: bool = True
+    ) -> tuple[pd.DataFrame, bool]:
+        """
+        Fetch historical candlesticks from exchange via REST API with optional freshness validation.
         
         Args:
             timeframe: Timeframe string (e.g., '1m', '5m')
             count: Number of candles to fetch (default: 500)
+            validate_freshness: Whether to validate data freshness (default: True)
             
         Returns:
-            DataFrame with OHLCV data and timestamp
+            Tuple of (DataFrame with OHLCV data, is_fresh: bool)
+            If validate_freshness is False, is_fresh will always be True
             
         Raises:
             RuntimeError: If not connected to exchange
@@ -155,8 +242,17 @@ class MarketDataClient:
                 for _, row in df.iterrows():
                     self.buffers[timeframe].append(row.to_dict())
             
-            logger.info(f"Fetched {len(df)} candles for {timeframe} (requested: {count})")
-            return df
+            # Validate freshness if requested
+            is_fresh = True
+            if validate_freshness:
+                is_fresh, age_seconds = self.validate_data_freshness(df, timeframe)
+                if not is_fresh:
+                    logger.warning(
+                        f"Fetched data for {timeframe} is stale: age={age_seconds:.1f}s"
+                    )
+            
+            logger.info(f"Fetched {len(df)} candles for {timeframe} (requested: {count}, fresh: {is_fresh})")
+            return df, is_fresh
             
         except Exception as e:
             logger.error(f"Failed to fetch candles for {timeframe}: {e}")
@@ -226,7 +322,7 @@ class MarketDataClient:
                 # Refetch candles to ensure continuity
                 try:
                     for tf in self.timeframes:
-                        self.get_latest_candles(tf, self.buffer_size)
+                        _, _ = self.get_latest_candles(tf, self.buffer_size, validate_freshness=False)
                     return True
                 except Exception as e:
                     logger.error(f"Failed to refetch candles after reconnection: {e}")

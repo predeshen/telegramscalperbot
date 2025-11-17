@@ -23,7 +23,9 @@ def signal_detector():
 @pytest.fixture
 def bullish_confluence_data():
     """Create data that meets all bullish confluence criteria."""
-    timestamps = pd.date_range('2025-01-01', periods=3, freq='1min')
+    # Use current time to avoid stale signal rejection
+    now = datetime.now()
+    timestamps = pd.date_range(now - timedelta(minutes=2), periods=3, freq='1min')
     
     data = pd.DataFrame({
         'timestamp': timestamps,
@@ -44,7 +46,9 @@ def bullish_confluence_data():
 @pytest.fixture
 def bearish_confluence_data():
     """Create data that meets all bearish confluence criteria."""
-    timestamps = pd.date_range('2025-01-01', periods=3, freq='1min')
+    # Use current time to avoid stale signal rejection
+    now = datetime.now()
+    timestamps = pd.date_range(now - timedelta(minutes=2), periods=3, freq='1min')
     
     data = pd.DataFrame({
         'timestamp': timestamps,
