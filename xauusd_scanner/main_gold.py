@@ -162,7 +162,7 @@ def main():
     logger.info("Fetching initial candlestick data...")
     candle_data = {}
     for timeframe in config['exchange']['timeframes']:
-        candles = market_client.get_latest_candles(timeframe, count=500)
+        candles, is_fresh = market_client.get_latest_candles(timeframe, count=500)
         
         # Calculate indicators
         candles['ema_9'] = indicator_calc.calculate_ema(candles, 9)
@@ -254,7 +254,7 @@ def main():
             for timeframe in config['exchange']['timeframes']:
                 try:
                     # Fetch latest candles
-                    candles = market_client.get_latest_candles(timeframe, count=500)
+                    candles, is_fresh = market_client.get_latest_candles(timeframe, count=500)
                     
                     # Calculate indicators
                     candles['ema_9'] = indicator_calc.calculate_ema(candles, 9)
@@ -396,7 +396,7 @@ def main():
             if current_time - last_heartbeat >= heartbeat_interval:
                 try:
                     # Get latest data for heartbeat
-                    df = market_client.get_latest_candles(config['exchange']['timeframes'][0], 10)
+                    df, _ = market_client.get_latest_candles(config['exchange']['timeframes'][0], 10)
                     if not df.empty:
                         last_candle = df.iloc[-1]
                         session_info = session_manager.get_session_info()
