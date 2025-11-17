@@ -45,8 +45,7 @@ class US30Strategy:
         
         # FVG settings
         self.fvg_detector = FVGDetector(
-            min_gap_percent=us30_config.get('min_fvg_percent', 0.05),  # 0.05% minimum gap
-            max_lookback=us30_config.get('fvg_lookback', 20)
+            min_gap_percent=us30_config.get('min_fvg_percent', 0.05)  # 0.05% minimum gap
         )
         
         # Market structure settings
@@ -181,7 +180,8 @@ class US30Strategy:
                 return None
             
             # 4. Detect FVG
-            fvg = self.fvg_detector.detect_fvg(data)
+            fvgs = self.fvg_detector.detect_fvgs(data, timeframe)
+            fvg = fvgs[-1] if fvgs else None
             
             # 5. Detect structure break
             structure_break = self.structure_analyzer.detect_structure_break(data)
@@ -203,7 +203,7 @@ class US30Strategy:
             strategy_name = f"US30 Momentum ({hold_type})"
             
             # Bullish signal
-            if (fvg and fvg.gap_type == "bullish") or (structure_break and structure_break.direction == "bullish"):
+            if (fvg and fvg.fvg_type == "regular") or (structure_break and structure_break.direction == "bullish"):
                 # Additional confirmation: price above EMA50 or strong bullish candle
                 if last['close'] > last['ema_50'] or (last['close'] > last['open'] and body_percent > 70):
                     signal_type = "LONG"
@@ -271,9 +271,9 @@ class US30Strategy:
                             'hold_days': hold_days,
                             'hold_reasoning': hold_reasoning,
                             'fvg': {
-                                'gap_type': fvg.gap_type,
-                                'gap_low': fvg.gap_low,
-                                'gap_high': fvg.gap_high,
+                                'fvg_type': fvg.fvg_type,
+                                'low': fvg.low,
+                                'high': fvg.high,
                                 'gap_percent': fvg.gap_percent
                             } if fvg else None,
                             'structure_break': {
@@ -289,7 +289,7 @@ class US30Strategy:
                     return signal
             
             # Bearish signal
-            elif (fvg and fvg.gap_type == "bearish") or (structure_break and structure_break.direction == "bearish"):
+            elif (fvg and fvg.fvg_type == "inverse") or (structure_break and structure_break.direction == "bearish"):
                 # Additional confirmation: price below EMA50 or strong bearish candle
                 if last['close'] < last['ema_50'] or (last['close'] < last['open'] and body_percent > 70):
                     signal_type = "SHORT"
@@ -357,9 +357,9 @@ class US30Strategy:
                             'hold_days': hold_days,
                             'hold_reasoning': hold_reasoning,
                             'fvg': {
-                                'gap_type': fvg.gap_type,
-                                'gap_low': fvg.gap_low,
-                                'gap_high': fvg.gap_high,
+                                'fvg_type': fvg.fvg_type,
+                                'low': fvg.low,
+                                'high': fvg.high,
                                 'gap_percent': fvg.gap_percent
                             } if fvg else None,
                             'structure_break': {
