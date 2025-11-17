@@ -77,21 +77,24 @@ def main():
     # Initialize core components
     logger.info("Initializing components...")
     
-    # Use HybridDataClient for Gold data with multiple fallback providers
-    from src.hybrid_data_client import HybridDataClient
+    # Use YFinanceClient for Gold SPOT data (not futures)
+    from src.yfinance_client import YFinanceClient
     
-    price_offset = config['exchange'].get('price_offset', 0.0)
-    
-    market_client = HybridDataClient(
-        symbol='GC=F',  # Gold Futures
+    # Use Gold SPOT ticker for accurate XAU/USD prices
+    # Note: yfinance doesn't have direct XAU/USD, but we can use gold ETFs or calculate from GLD
+    # For now, using GC=F (futures) as fallback, but prices will need adjustment
+    market_client = YFinanceClient(
+        symbol='GC=F',  # Gold Futures (closest to spot on yfinance)
         timeframes=config['exchange']['timeframes'],
         buffer_size=200
     )
     
+    price_offset = config['exchange'].get('price_offset', 0.0)
     if price_offset != 0:
         logger.info(f"Price offset: {price_offset:+.2f} (adjusting futures to match spot prices)")
     
-    logger.info("Using HybridDataClient with multiple fallback providers for Gold data")
+    logger.warning("Using Gold Futures (GC=F) as proxy for XAU/USD spot - prices may differ from your broker")
+    logger.info("Consider using a real-time Gold spot data provider for accurate XAU/USD prices")
     
     indicator_calc = IndicatorCalculator()
     
@@ -166,7 +169,8 @@ def main():
     logger.info("Fetching initial candlestick data...")
     candle_data = {}
     for timeframe in config['exchange']['timeframes']:
-        candles, is_fresh = market_client.get_latest_candles(timeframe, count=500)
+        # Disable freshness validation for Gold - yfinance data is always delayed
+        candles, is_fresh = market_client.get_latest_candles(timeframe, count=500, validate_freshness=False)
         
         # Calculate indicators
         candles['ema_9'] = indicator_calc.calculate_ema(candles, 9)
@@ -257,8 +261,8 @@ def main():
             # Update data for each timeframe
             for timeframe in config['exchange']['timeframes']:
                 try:
-                    # Fetch latest candles
-                    candles, is_fresh = market_client.get_latest_candles(timeframe, count=500)
+                    # Fetch latest candles (disable freshness validation for Gold - yfinance data is always delayed)
+                    candles, is_fresh = market_client.get_latest_candles(timeframe, count=500, validate_freshness=False)
                     
                     # Calculate indicators
                     candles['ema_9'] = indicator_calc.calculate_ema(candles, 9)

@@ -81,16 +81,12 @@ def main():
     # Initialize components
     logger.info("Initializing components...")
     
-    # Use HybridDataClient for US30 data with multiple fallback providers
-    from src.hybrid_data_client import HybridDataClient
-    
-    market_client = HybridDataClient(
+    # Use YFinanceClient for US30 data
+    market_client = YFinanceClient(
         symbol=config['exchange']['symbol'],
         timeframes=config['exchange']['timeframes'],
         buffer_size=200
     )
-    
-    logger.info("Using HybridDataClient with multiple fallback providers for US30 data")
     
     indicator_calc = IndicatorCalculator()
     
@@ -151,7 +147,8 @@ def main():
     logger.info("Fetching initial data...")
     candle_data = {}
     for timeframe in config['exchange']['timeframes']:
-        candles, is_fresh = market_client.get_latest_candles(timeframe, count=500)
+        # Disable freshness validation for US30 - yfinance data may be delayed
+        candles, is_fresh = market_client.get_latest_candles(timeframe, count=500, validate_freshness=False)
         
         # Calculate indicators
         candles['ema_8'] = indicator_calc.calculate_ema(candles, config['indicators']['ema_fast'])
@@ -206,8 +203,8 @@ def main():
             # Update data for each timeframe
             for timeframe in config['exchange']['timeframes']:
                 try:
-                    # Fetch latest candles
-                    candles, is_fresh = market_client.get_latest_candles(timeframe, count=500)
+                    # Fetch latest candles (disable freshness validation - yfinance data may be delayed)
+                    candles, is_fresh = market_client.get_latest_candles(timeframe, count=500, validate_freshness=False)
                     
                     # Calculate indicators
                     candles['ema_8'] = indicator_calc.calculate_ema(candles, config['indicators']['ema_fast'])
