@@ -81,9 +81,9 @@ def main():
         diagnostics = SignalDiagnostics("Multi-Symbol-Scanner")
         logger.info("Diagnostic system initialized")
         
-        # Validate configuration
+        # Validate configuration (use global_settings for validation)
         validator = ConfigValidator()
-        config_dict = config_manager.config  # Get the raw config dict
+        config_dict = config_manager.global_settings
         warnings = validator.validate_config(config_dict)
         if warnings:
             for warning in warnings:
