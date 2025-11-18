@@ -130,6 +130,7 @@ echo "  • gold-swing-scanner.service"
 echo "  • us30-scalp-scanner.service"
 echo "  • us30-swing-scanner.service"
 echo "  • us30-momentum-scanner.service"
+echo "  • btc-us100-scanner.service"
 echo
 echo "Multi-Symbol Scanners (Recommended):"
 echo "  • multi-crypto-scalp-scanner.service   (BTC, ETH, SOL - 1m/5m/15m)"
@@ -145,7 +146,7 @@ echo
 echo "2. Enable services to start on boot (choose legacy OR multi-symbol):"
 echo
 echo "   Legacy scanners:"
-echo "   sudo systemctl enable btc-scalp-scanner btc-swing-scanner gold-scalp-scanner gold-swing-scanner us30-scalp-scanner us30-swing-scanner us30-momentum-scanner"
+echo "   sudo systemctl enable btc-scalp-scanner btc-swing-scanner gold-scalp-scanner gold-swing-scanner us30-scalp-scanner us30-swing-scanner us30-momentum-scanner btc-us100-scanner"
 echo
 echo "   Multi-symbol scanners (recommended):"
 echo "   sudo systemctl enable multi-crypto-scalp-scanner multi-crypto-swing-scanner multi-fx-scalp-scanner multi-mixed-scanner"
@@ -153,7 +154,7 @@ echo
 echo "3. Start services:"
 echo
 echo "   Legacy scanners:"
-echo "   sudo systemctl start btc-scalp-scanner btc-swing-scanner gold-scalp-scanner gold-swing-scanner us30-scalp-scanner us30-swing-scanner us30-momentum-scanner"
+echo "   sudo systemctl start btc-scalp-scanner btc-swing-scanner gold-scalp-scanner gold-swing-scanner us30-scalp-scanner us30-swing-scanner us30-momentum-scanner btc-us100-scanner"
 echo
 echo "   Multi-symbol scanners (recommended):"
 echo "   sudo systemctl start multi-crypto-scalp-scanner multi-crypto-swing-scanner multi-fx-scalp-scanner multi-mixed-scanner"
@@ -171,6 +172,8 @@ echo "  Start all legacy:  sudo systemctl start btc-*-scanner gold-*-scanner us3
 echo "  Start all multi:   sudo systemctl start multi-*-scanner"
 echo "  Stop all:          sudo systemctl stop btc-*-scanner gold-*-scanner us30-*-scanner multi-*-scanner"
 echo "  Status all:        sudo systemctl status btc-*-scanner gold-*-scanner us30-*-scanner multi-*-scanner"
+echo
+echo "Note: btc-us100-scanner is included in btc-*-scanner pattern"
 echo
 echo "For more information, see: deployment/INSTALL_SERVICES.md"
 echo

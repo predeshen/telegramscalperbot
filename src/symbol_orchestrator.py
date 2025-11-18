@@ -25,7 +25,9 @@ class SymbolOrchestrator:
         self,
         config_manager: AssetConfigManager,
         alerter: Any,
-        max_concurrent_symbols: int = 10
+        max_concurrent_symbols: int = 10,
+        diagnostics: Optional[Any] = None,
+        bypass_mode: Optional[Any] = None
     ):
         """
         Initialize orchestrator.
@@ -34,10 +36,14 @@ class SymbolOrchestrator:
             config_manager: Asset configuration manager
             alerter: Alerter instance for sending notifications
             max_concurrent_symbols: Maximum number of symbols to scan concurrently
+            diagnostics: Optional SignalDiagnostics instance
+            bypass_mode: Optional BypassMode instance
         """
         self.config_manager = config_manager
         self.alerter = alerter
         self.max_concurrent_symbols = max_concurrent_symbols
+        self.diagnostics = diagnostics
+        self.bypass_mode = bypass_mode
         
         # Core components
         self.signal_filter = SignalFilter(

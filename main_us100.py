@@ -1,6 +1,6 @@
 """
-US30 Aggressive Momentum Scanner
-Designed to catch big directional moves with FVG and structure breaks
+US100/NASDAQ Scanner
+Monitors NASDAQ-100 index for trading signals using multiple strategies including H4-HVG
 """
 import json
 import logging
@@ -13,7 +13,7 @@ from pathlib import Path
 
 from src.yfinance_client import YFinanceClient
 from src.indicator_calculator import IndicatorCalculator
-from src.us30_strategy import US30Strategy
+from src.signal_detector import SignalDetector
 from src.signal_quality_filter import SignalQualityFilter, QualityConfig
 from src.alerter import TelegramAlerter
 from src.trade_tracker import TradeTracker
@@ -42,7 +42,7 @@ def setup_logging(log_file: str, log_level: str) -> None:
     logger.info(f"Logging initialized: {log_file} (level={log_level})")
 
 
-def load_config(config_path: str = "config/us30_config.json") -> dict:
+def load_config(config_path: str = "config/us100_config.json") -> dict:
     """Load configuration from JSON file."""
     with open(config_path, 'r') as f:
         return json.load(f)
@@ -56,7 +56,7 @@ def signal_handler(signum, frame):
 
 
 def main():
-    """Main scanner loop for US30 momentum trading."""
+    """Main scanner loop for US100/NASDAQ."""
     # Register signal handlers
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
@@ -72,13 +72,13 @@ def main():
     
     logger = logging.getLogger(__name__)
     logger.info("=" * 60)
-    logger.info("US30 AGGRESSIVE MOMENTUM SCANNER")
-    logger.info("Strategy: FVG + Structure Breaks + Momentum")
+    logger.info("US100/NASDAQ Scanner Starting")
+    logger.info(f"Symbol: {config['symbol']}")
     logger.info(f"Timeframes: {', '.join(config['timeframes'])}")
     logger.info("=" * 60)
     
     # Initialize diagnostic system
-    diagnostics = SignalDiagnostics("US30-Momentum")
+    diagnostics = SignalDiagnostics("US100-Scanner")
     logger.info("Diagnostic system initialized")
     
     # Validate configuration
@@ -87,9 +87,6 @@ def main():
     if warnings:
         for warning in warnings:
             logger.warning(f"Config: {warning}")
-    
-    # Initialize bypass mode
-    bypass_mode = BypassMode(config, None)  # Will set alerter later
     
     # Initialize components
     market_client = YFinanceClient(
@@ -100,25 +97,30 @@ def main():
     
     indicator_calc = IndicatorCalculator()
     
-    # Initialize US30 strategy with diagnostics
-    us30_strategy = US30Strategy(config=config, diagnostics=diagnostics)
+    # Initialize signal detector with diagnostics
+    signal_detector = SignalDetector(
+        volume_spike_threshold=config['signal_rules']['volume_spike_threshold'],
+        rsi_min=config['signal_rules']['rsi_min'],
+        rsi_max=config['signal_rules']['rsi_max'],
+        stop_loss_atr_multiplier=config['signal_rules']['stop_loss_atr_multiplier'],
+        take_profit_atr_multiplier=config['signal_rules']['take_profit_atr_multiplier'],
+        duplicate_time_window_minutes=config['signal_rules']['duplicate_time_window_minutes'],
+        duplicate_price_threshold_percent=config['signal_rules']['duplicate_price_threshold_percent'],
+        diagnostics=diagnostics
+    )
     
-    # Initialize alerter
-    alerter = None
-    if config['telegram']['enabled']:
-        bot_token = config['telegram'].get('bot_token') or os.getenv(config['telegram'].get('bot_token_env', ''))
-        chat_id = config['telegram'].get('chat_id') or os.getenv(config['telegram'].get('chat_id_env', ''))
-        
-        if bot_token and chat_id:
-            alerter = TelegramAlerter(bot_token, chat_id)
-            logger.info("Telegram alerter initialized")
-        else:
-            logger.warning("Telegram credentials not found")
+    # Set config for detection strategies
+    signal_detector.config = {
+        'signal_rules': config.get('signal_rules', {}),
+        'asset_specific': config.get('asset_specific', {})
+    }
     
-    # Set alerter for bypass mode
-    bypass_mode.alerter = alerter
+    # Configure H4 HVG if enabled
+    if config.get('h4_hvg', {}).get('enabled', False):
+        signal_detector.configure_h4_hvg(config['h4_hvg'], config['symbol'])
+        logger.info("H4 HVG detection enabled for US100/NASDAQ")
     
-    # Initialize quality filter
+    # Initialize quality filter with diagnostics
     quality_filter_config = config.get('quality_filter', {})
     quality_config = QualityConfig(
         min_confluence_factors=quality_filter_config.get('min_confluence_factors', 3),
@@ -131,6 +133,21 @@ def main():
     quality_filter = SignalQualityFilter(quality_config, diagnostics=diagnostics)
     logger.info("Signal Quality Filter initialized")
     
+    # Initialize alerter
+    alerter = None
+    if config['telegram']['enabled']:
+        bot_token = config['telegram'].get('bot_token') or os.getenv('TELEGRAM_BOT_TOKEN')
+        chat_id = config['telegram'].get('chat_id') or os.getenv('TELEGRAM_CHAT_ID')
+        
+        if bot_token and chat_id:
+            alerter = TelegramAlerter(bot_token, chat_id)
+            logger.info("Telegram alerter initialized")
+        else:
+            logger.warning("Telegram credentials not found")
+    
+    # Initialize bypass mode
+    bypass_mode = BypassMode(config, alerter)
+    
     # Initialize trade tracker
     trade_tracker = TradeTracker(alerter=alerter)
     
@@ -141,11 +158,11 @@ def main():
             smtp_config = config['excel_reporting'].get('smtp', {})
             if smtp_config.get('password') and smtp_config['password'] != 'DISABLED':
                 excel_reporter = ExcelReporter(
-                    excel_file_path=config['excel_reporting'].get('excel_file_path', 'logs/us30_momentum_scans.xlsx'),
+                    excel_file_path=config['excel_reporting'].get('excel_file_path', 'logs/us100_scans.xlsx'),
                     smtp_config=smtp_config,
                     report_interval_seconds=config['excel_reporting'].get('report_interval_seconds', 3600),
                     initial_report_delay_seconds=config['excel_reporting'].get('initial_report_delay_seconds', 300),
-                    scanner_name="US30 Momentum Scanner"
+                    scanner_name="US100 Scanner"
                 )
                 excel_reporter.start()
                 logger.info("Excel reporting enabled")
@@ -166,21 +183,13 @@ def main():
         candles, is_fresh = market_client.get_latest_candles(timeframe, count=500, validate_freshness=False)
         
         # Calculate indicators
-        candles['ema_9'] = indicator_calc.calculate_ema(candles, 9)
-        candles['ema_21'] = indicator_calc.calculate_ema(candles, 21)
-        candles['ema_50'] = indicator_calc.calculate_ema(candles, 50)
-        candles['ema_100'] = indicator_calc.calculate_ema(candles, 100)
-        candles['ema_200'] = indicator_calc.calculate_ema(candles, 200)
-        candles['vwap'] = indicator_calc.calculate_vwap(candles)
-        candles['atr'] = indicator_calc.calculate_atr(candles, 14)
-        candles['rsi'] = indicator_calc.calculate_rsi(candles, 14)
-        candles['volume_ma'] = indicator_calc.calculate_volume_ma(candles, 20)
-        candles['adx'] = indicator_calc.calculate_adx(candles, period=14)
-        
-        # Calculate Stochastic
-        stoch_k, stoch_d = indicator_calc.calculate_stochastic(candles, k_period=14, d_period=3, smooth_k=3)
-        candles['stoch_k'] = stoch_k
-        candles['stoch_d'] = stoch_d
+        candles = indicator_calc.calculate_all_indicators(
+            candles,
+            ema_periods=[9, 21, 50, 100, 200],
+            atr_period=14,
+            rsi_period=14,
+            volume_ma_period=20
+        )
         
         candle_data[timeframe] = candles
         logger.info(f"Loaded {timeframe} data with indicators")
@@ -192,13 +201,12 @@ def main():
             current_price = df.iloc[-1]['close'] if not df.empty else 0
             
             startup_msg = (
-                f"🚀 <b>US30 Momentum Scanner Started</b>\n\n"
+                f"🚀 <b>US100/NASDAQ Scanner Started</b>\n\n"
                 f"💰 Current Price: ${current_price:,.2f}\n"
                 f"⏰ Timeframes: {', '.join(config['timeframes'])}\n"
-                f"🎯 Strategy: FVG + Structure Breaks\n"
-                f"📊 Min ADX: {config.get('us30_strategy', {}).get('min_adx', 25)}\n"
-                f"🎯 Target: {config.get('us30_strategy', {}).get('initial_tp_atr', 2.5)} ATR\n\n"
-                f"🔍 Hunting for big moves..."
+                f"🎯 Strategies: H4-HVG, Momentum Shift, Trend Alignment, EMA Cloud, Mean Reversion\n"
+                f"📊 Symbol: {config['symbol']}\n\n"
+                f"🔍 Scanning for opportunities..."
             )
             alerter.send_message(startup_msg)
         except Exception as e:
@@ -213,50 +221,50 @@ def main():
     
     try:
         while True:
+            # Check bypass mode auto-disable
+            bypass_mode.check_auto_disable()
+            
             # Update data for each timeframe
             for timeframe in config['timeframes']:
                 try:
-                    # Fetch latest candles (disable freshness validation)
+                    # Fetch latest candles
                     candles, is_fresh = market_client.get_latest_candles(timeframe, count=500, validate_freshness=False)
                     
                     # Calculate indicators
-                    candles['ema_9'] = indicator_calc.calculate_ema(candles, 9)
-                    candles['ema_21'] = indicator_calc.calculate_ema(candles, 21)
-                    candles['ema_50'] = indicator_calc.calculate_ema(candles, 50)
-                    candles['ema_100'] = indicator_calc.calculate_ema(candles, 100)
-                    candles['ema_200'] = indicator_calc.calculate_ema(candles, 200)
-                    candles['vwap'] = indicator_calc.calculate_vwap(candles)
-                    candles['atr'] = indicator_calc.calculate_atr(candles, 14)
-                    candles['rsi'] = indicator_calc.calculate_rsi(candles, 14)
-                    candles['volume_ma'] = indicator_calc.calculate_volume_ma(candles, 20)
-                    candles['adx'] = indicator_calc.calculate_adx(candles, period=14)
-                    
-                    stoch_k, stoch_d = indicator_calc.calculate_stochastic(candles, k_period=14, d_period=3, smooth_k=3)
-                    candles['stoch_k'] = stoch_k
-                    candles['stoch_d'] = stoch_d
+                    candles = indicator_calc.calculate_all_indicators(
+                        candles,
+                        ema_periods=[9, 21, 50, 100, 200],
+                        atr_period=14,
+                        rsi_period=14,
+                        volume_ma_period=20
+                    )
                     
                     candle_data[timeframe] = candles
                     
-                    # Detect signals using US30 strategy
-                    detected_signal = us30_strategy.detect_signal(candles, timeframe)
+                    # Detect signals
+                    detected_signal = signal_detector.detect_signals(candles, timeframe, "US100")
                     
                     # Log scan result to Excel
                     if excel_reporter and not candles.empty:
                         last_row = candles.iloc[-1]
+                        scanner_name = 'US100'
+                        if detected_signal and getattr(detected_signal, 'strategy', '') == 'H4 HVG':
+                            scanner_name = 'US100-H4HVG'
                         
                         scan_data = {
                             'timestamp': datetime.now(),
-                            'scanner': 'US30-Momentum',
+                            'scanner': scanner_name,
                             'symbol': config['symbol'],
                             'timeframe': timeframe,
                             'price': last_row['close'],
                             'volume': last_row['volume'],
                             'indicators': {
+                                'ema_9': last_row.get('ema_9', None),
+                                'ema_21': last_row.get('ema_21', None),
                                 'ema_50': last_row.get('ema_50', None),
                                 'rsi': last_row.get('rsi', None),
                                 'atr': last_row.get('atr', None),
-                                'adx': last_row.get('adx', None),
-                                'volume_ma': last_row.get('volume_ma', None)
+                                'adx': last_row.get('adx', None)
                             },
                             'signal_detected': detected_signal is not None,
                             'signal_type': detected_signal.signal_type if detected_signal else None,
@@ -266,23 +274,39 @@ def main():
                                 'take_profit': detected_signal.take_profit,
                                 'risk_reward': detected_signal.risk_reward,
                                 'strategy': detected_signal.strategy,
-                                'confidence': detected_signal.confidence,
-                                'reasoning': detected_signal.reasoning
+                                'confidence': detected_signal.confidence
                             } if detected_signal else {}
                         }
                         excel_reporter.log_scan_result(scan_data)
                     
                     if detected_signal:
                         logger.info(f"🚨 {detected_signal.signal_type} SIGNAL on {timeframe}!")
+                        logger.info(f"Strategy: {detected_signal.strategy}")
                         logger.info(f"Entry: ${detected_signal.entry_price:.2f}, SL: ${detected_signal.stop_loss:.2f}, TP: ${detected_signal.take_profit:.2f}")
                         logger.info(f"Confidence: {detected_signal.confidence}/5, R:R = {detected_signal.risk_reward:.2f}")
                         
-                        # Send alert
-                        if alerter:
-                            alerter.send_signal_alert(detected_signal)
+                        # Apply quality filter (unless bypass mode)
+                        if bypass_mode.should_bypass_filters():
+                            logger.warning("⚠️ BYPASS MODE - Skipping quality filter")
+                            signal_to_send = detected_signal
+                        else:
+                            filter_result = quality_filter.evaluate_signal(detected_signal, candles)
+                            
+                            if filter_result.passed:
+                                logger.info(f"✓ Signal passed quality filter")
+                                signal_to_send = detected_signal
+                            else:
+                                logger.info(f"✗ Signal rejected by quality filter: {filter_result.rejection_reason}")
+                                signal_to_send = None
                         
-                        # Track trade
-                        trade_tracker.add_trade(detected_signal)
+                        # Send alert if signal passed
+                        if signal_to_send and alerter:
+                            prefix = bypass_mode.format_signal_prefix()
+                            alerter.send_signal_alert(signal_to_send)
+                            quality_filter.add_signal_to_history(signal_to_send)
+                            
+                            # Track trade
+                            trade_tracker.add_trade(signal_to_send)
                 
                 except Exception as e:
                     logger.error(f"Error processing {timeframe}: {e}")
@@ -299,7 +323,7 @@ def main():
                         'rsi': last_candle.get('rsi', 50),
                         'prev_rsi': prev_candle.get('rsi', 50),
                         'adx': last_candle.get('adx', 0),
-                        'volume_ratio': last_candle['volume'] / last_candle['volume_ma'] if last_candle.get('volume_ma', 0) > 0 else 0
+                        'volume_ratio': last_candle['volume'] / last_candle.get('volume_ma', 1) if last_candle.get('volume_ma', 0) > 0 else 0
                     }
                     
                     trade_tracker.update_trades(current_price, indicators)
@@ -314,13 +338,18 @@ def main():
                     df = candle_data[config['timeframes'][0]]
                     if not df.empty:
                         last_candle = df.iloc[-1]
+                        
+                        # Generate diagnostic report
+                        report = diagnostics.generate_report()
+                        
                         heartbeat_msg = (
-                            f"💙 <b>US30 Scanner Heartbeat</b>\n\n"
+                            f"💙 <b>US100 Scanner Heartbeat</b>\n\n"
                             f"⏰ Time: {datetime.now().strftime('%H:%M:%S UTC')}\n"
                             f"💰 Price: ${last_candle['close']:,.2f}\n"
-                            f"📊 ADX: {last_candle.get('adx', 0):.1f}\n"
-                            f"📈 RSI: {last_candle.get('rsi', 0):.1f}\n"
-                            f"🔍 Status: Actively scanning..."
+                            f"📊 RSI: {last_candle.get('rsi', 0):.1f}\n"
+                            f"📈 ADX: {last_candle.get('adx', 0):.1f}\n"
+                            f"🔍 Status: Actively scanning...\n\n"
+                            f"{report.to_telegram_message()}"
                         )
                         alerter.send_message(heartbeat_msg)
                         last_heartbeat = current_time
@@ -335,8 +364,12 @@ def main():
         logger.info("Scanner stopped by user")
         logger.info("=" * 60)
         
+        # Stop Excel reporter
         if excel_reporter:
             excel_reporter.stop()
+        
+        # Generate final diagnostic report
+        logger.info("\n" + diagnostics.generate_report_text())
     
     except Exception as e:
         logger.error(f"Fatal error in main loop: {e}", exc_info=True)

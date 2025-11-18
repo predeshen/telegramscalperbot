@@ -226,7 +226,9 @@ class SignalDetector:
 
         duplicate_time_window_minutes: int = 5,
 
-        duplicate_price_threshold_percent: float = 0.3
+        duplicate_price_threshold_percent: float = 0.3,
+
+        diagnostics=None
 
     ):
 
@@ -251,6 +253,8 @@ class SignalDetector:
             duplicate_time_window_minutes: Time window to block duplicate signals
 
             duplicate_price_threshold_percent: Price move % to allow new signal
+
+            diagnostics: Optional SignalDiagnostics instance for tracking
 
         """
 
@@ -281,6 +285,12 @@ class SignalDetector:
         
         # Config for optional features (can be set externally)
         self.config = {}
+
+        
+
+        # Diagnostics tracker (optional)
+
+        self.diagnostics = diagnostics
 
         
 
@@ -1062,6 +1072,85 @@ class SignalDetector:
         except Exception as e:
             logger.error(f"Error in momentum shift detection: {e}", exc_info=True)
             return None
+    
+    def validate_data_quality(self, data: pd.DataFrame, timeframe: str) -> tuple[bool, list[str]]:
+        """
+        Validate data quality before signal detection
+        
+        Checks:
+        - Minimum candle count (50)
+        - NaN values in critical indicators
+        - Timestamp freshness
+        - Volume validity
+        
+        Args:
+            data: DataFrame with OHLCV and indicators
+            timeframe: Timeframe string
+            
+        Returns:
+            (is_valid, issues) tuple
+        """
+        issues = []
+        
+        # Check minimum candle count
+        if len(data) < 50:
+            issues.append(f"Insufficient candles: {len(data)} < 50")
+            if self.diagnostics:
+                self.diagnostics.log_data_quality_issue(f"Insufficient candles ({len(data)})")
+            return False, issues
+        
+        # Check for NaN in critical indicators
+        last = data.iloc[-1]
+        critical_indicators = ['close', 'volume', 'ema_9', 'ema_21', 'rsi', 'atr']
+        
+        for indicator in critical_indicators:
+            if indicator in last.index and pd.isna(last[indicator]):
+                issues.append(f"NaN value in {indicator}")
+                if self.diagnostics:
+                    self.diagnostics.log_data_quality_issue(f"NaN in {indicator}")
+        
+        # Check timestamp freshness
+        if 'timestamp' in last.index:
+            expected_interval = self._get_interval_seconds(timeframe)
+            age_seconds = (datetime.now() - last['timestamp']).total_seconds()
+            
+            if age_seconds > expected_interval * 2:
+                issues.append(f"Stale data: {age_seconds:.0f}s old (expected < {expected_interval * 2}s)")
+                if self.diagnostics:
+                    self.diagnostics.log_data_quality_issue(f"Stale data ({age_seconds:.0f}s)")
+        
+        # Check volume validity
+        if 'volume' in last.index and last['volume'] <= 0:
+            issues.append("Zero or negative volume")
+            if self.diagnostics:
+                self.diagnostics.log_data_quality_issue("Zero/negative volume")
+        
+        is_valid = len(issues) == 0
+        
+        if not is_valid:
+            logger.warning(f"Data quality issues for {timeframe}: {', '.join(issues)}")
+        
+        return is_valid, issues
+    
+    def _get_interval_seconds(self, timeframe: str) -> int:
+        """
+        Get expected interval in seconds for a timeframe
+        
+        Args:
+            timeframe: Timeframe string (e.g., '1m', '5m', '1h', '4h', '1d')
+            
+        Returns:
+            Interval in seconds
+        """
+        intervals = {
+            '1m': 60,
+            '5m': 300,
+            '15m': 900,
+            '1h': 3600,
+            '4h': 14400,
+            '1d': 86400
+        }
+        return intervals.get(timeframe, 300)  # Default to 5 minutes
 
     
 
@@ -1098,6 +1187,73 @@ class SignalDetector:
             # If we can't determine age, assume it's fresh to be safe
             return False
     
+    def validate_data_quality(self, data: pd.DataFrame, timeframe: str) -> tuple[bool, list[str]]:
+        """
+        Validate data quality before signal detection
+        
+        Args:
+            data: DataFrame with market data and indicators
+            timeframe: Timeframe string
+            
+        Returns:
+            Tuple of (is_valid, issues)
+        """
+        issues = []
+        
+        # Check minimum candle count
+        if len(data) < 50:
+            issues.append(f"Insufficient candles: {len(data)} < 50")
+            if self.diagnostics:
+                self.diagnostics.log_data_quality_issue(f"Insufficient candles ({len(data)})")
+            return False, issues
+        
+        # Check for NaN in critical indicators
+        last = data.iloc[-1]
+        critical_indicators = ['close', 'volume', 'ema_9', 'ema_21', 'rsi', 'atr']
+        
+        for indicator in critical_indicators:
+            if indicator in last.index and pd.isna(last[indicator]):
+                issues.append(f"NaN value in {indicator}")
+                if self.diagnostics:
+                    self.diagnostics.log_data_quality_issue(f"NaN in {indicator}")
+        
+        # Check timestamp freshness
+        try:
+            expected_interval = self._get_interval_seconds(timeframe)
+            age_seconds = (datetime.now() - last['timestamp']).total_seconds()
+            
+            if age_seconds > expected_interval * 2:
+                issues.append(f"Stale data: {age_seconds:.0f}s old (expected < {expected_interval * 2}s)")
+                if self.diagnostics:
+                    self.diagnostics.log_data_quality_issue(f"Stale data ({age_seconds:.0f}s)")
+        except Exception as e:
+            logger.debug(f"Could not check timestamp freshness: {e}")
+        
+        # Check volume validity
+        if 'volume' in last.index and last['volume'] <= 0:
+            issues.append("Zero or negative volume")
+            if self.diagnostics:
+                self.diagnostics.log_data_quality_issue("Zero volume")
+        
+        is_valid = len(issues) == 0
+        
+        if not is_valid:
+            logger.warning(f"Data quality issues for {timeframe}: {', '.join(issues)}")
+        
+        return is_valid, issues
+    
+    def _get_interval_seconds(self, timeframe: str) -> int:
+        """Get expected interval in seconds for a timeframe"""
+        intervals = {
+            '1m': 60,
+            '5m': 300,
+            '15m': 900,
+            '1h': 3600,
+            '4h': 14400,
+            '1d': 86400
+        }
+        return intervals.get(timeframe, 300)
+    
     def detect_signals(self, data: pd.DataFrame, timeframe: str, symbol: str = "BTC/USD") -> Optional[Signal]:
 
         """
@@ -1124,6 +1280,22 @@ class SignalDetector:
 
         if data.empty or len(data) < 3:
 
+            if self.diagnostics:
+
+                self.diagnostics.log_data_quality_issue("Insufficient candles")
+
+            return None
+
+        
+
+        # Validate data quality before detection
+
+        is_valid, issues = self.validate_data_quality(data, timeframe)
+
+        if not is_valid:
+
+            logger.debug(f"Skipping signal detection due to data quality issues: {', '.join(issues)}")
+
             return None
 
         
@@ -1134,93 +1306,175 @@ class SignalDetector:
 
         
 
-        # Priority 1: Check for momentum shift signal (NEW)
-        momentum_signal = self._detect_momentum_shift(data, timeframe, symbol)
-        if momentum_signal and not self._is_duplicate_signal(momentum_signal) and not self._is_signal_stale(momentum_signal):
-            self.signal_history.append(momentum_signal)
-            logger.info(f"{momentum_signal.signal_type} signal detected on {timeframe}: {momentum_signal.strategy}")
-            return momentum_signal
-        
-        # Priority 2: Check for trend alignment signal (NEW)
-        trend_alignment_signal = self._detect_trend_alignment(data, timeframe, symbol)
-        if trend_alignment_signal and not self._is_duplicate_signal(trend_alignment_signal) and not self._is_signal_stale(trend_alignment_signal):
-            self.signal_history.append(trend_alignment_signal)
-            logger.info(f"{trend_alignment_signal.signal_type} signal detected on {timeframe}: {trend_alignment_signal.strategy}")
-            return trend_alignment_signal
-        
-        # Priority 3: Check for EMA cloud breakout signal (NEW)
-        ema_cloud_signal = self._detect_ema_cloud_breakout(data, timeframe, symbol)
-        if ema_cloud_signal and not self._is_duplicate_signal(ema_cloud_signal) and not self._is_signal_stale(ema_cloud_signal):
-            self.signal_history.append(ema_cloud_signal)
-            logger.info(f"{ema_cloud_signal.signal_type} signal detected on {timeframe}: {ema_cloud_signal.strategy}")
-            return ema_cloud_signal
-        
-        # Priority 4: Check for mean reversion signal (NEW)
-        mean_reversion_signal = self._detect_mean_reversion(data, timeframe, symbol)
-        if mean_reversion_signal and not self._is_duplicate_signal(mean_reversion_signal) and not self._is_signal_stale(mean_reversion_signal):
-            self.signal_history.append(mean_reversion_signal)
-            logger.info(f"{mean_reversion_signal.signal_type} signal detected on {timeframe}: {mean_reversion_signal.strategy}")
-            return mean_reversion_signal
+        # Try each strategy and log attempts
+
+        strategies = [
+
+            ('Momentum Shift', self._detect_momentum_shift),
+
+            ('Trend Alignment', self._detect_trend_alignment),
+
+            ('EMA Cloud Breakout', self._detect_ema_cloud_breakout),
+
+            ('Mean Reversion', self._detect_mean_reversion),
+
+            ('Bullish Confluence', self._check_bullish_confluence),
+
+            ('Bearish Confluence', self._check_bearish_confluence),
+
+            ('Trend Following', self._detect_trend_following)
+
+        ]
 
         
 
-        # Priority 5: Check for bullish confluence signal
+        for strategy_name, strategy_func in strategies:
 
-        bullish_signal = self._check_bullish_confluence(data, timeframe, symbol)
+            try:
 
-        if bullish_signal and not self._is_duplicate_signal(bullish_signal) and not self._is_signal_stale(bullish_signal):
+                signal = strategy_func(data, timeframe, symbol)
 
-            self.signal_history.append(bullish_signal)
+                
 
-            logger.info(f"LONG signal detected on {timeframe}: {bullish_signal.entry_price}")
+                if signal:
 
-            return bullish_signal
+                    # Check for duplicates and staleness
+
+                    if self._is_duplicate_signal(signal):
+
+                        logger.debug(f"✗ {strategy_name} signal rejected as duplicate")
+
+                        if self.diagnostics:
+
+                            self.diagnostics.log_detection_attempt(strategy_name, False, "Duplicate signal")
+
+                        continue
+
+                    
+
+                    if self._is_signal_stale(signal):
+
+                        logger.debug(f"✗ {strategy_name} signal rejected as stale")
+
+                        if self.diagnostics:
+
+                            self.diagnostics.log_detection_attempt(strategy_name, False, "Stale signal")
+
+                        continue
+
+                    
+
+                    # Valid signal found
+
+                    self.signal_history.append(signal)
+
+                    logger.info(f"✓ {strategy_name} detected {signal.signal_type} signal on {timeframe}")
+
+                    
+
+                    if self.diagnostics:
+
+                        self.diagnostics.log_detection_attempt(strategy_name, True)
+
+                        self.diagnostics.log_signal_generated(strategy_name)
+
+                    
+
+                    return signal
+
+                else:
+
+                    # No signal from this strategy
+
+                    logger.debug(f"✗ {strategy_name} no signal")
+
+                    if self.diagnostics:
+
+                        self.diagnostics.log_detection_attempt(strategy_name, False, "Pattern not met")
+
+            
+
+            except Exception as e:
+
+                logger.error(f"Error in {strategy_name}: {e}")
+
+                if self.diagnostics:
+
+                    self.diagnostics.log_detection_attempt(strategy_name, False, f"Error: {str(e)}")
 
         
 
-        # Priority 6: Check for bearish confluence signal
+        # Check for extreme RSI reversal signals (if enabled)
 
-        bearish_signal = self._check_bearish_confluence(data, timeframe, symbol)
-
-        if bearish_signal and not self._is_duplicate_signal(bearish_signal) and not self._is_signal_stale(bearish_signal):
-
-            self.signal_history.append(bearish_signal)
-
-            logger.info(f"SHORT signal detected on {timeframe}: {bearish_signal.entry_price}")
-
-            return bearish_signal
-
-        
-
-        # Priority 7: Check for trend-following signal
-
-        trend_signal = self._detect_trend_following(data, timeframe, symbol)
-
-        if trend_signal and not self._is_duplicate_signal(trend_signal) and not self._is_signal_stale(trend_signal):
-
-            self.signal_history.append(trend_signal)
-
-            logger.info(f"{trend_signal.signal_type} trend-following signal detected on {timeframe}: {trend_signal.entry_price}")
-
-            return trend_signal
-
-        
-
-        # Check for extreme RSI reversal signals (like the BTC drop)
         if self.config.get('signal_rules', {}).get('enable_extreme_rsi_signals', False):
-            extreme_rsi_signal = self._detect_extreme_rsi_reversal(data, timeframe, symbol)
-            if extreme_rsi_signal and not self._is_duplicate_signal(extreme_rsi_signal) and not self._is_signal_stale(extreme_rsi_signal):
-                self.signal_history.append(extreme_rsi_signal)
-                logger.info(f"{extreme_rsi_signal.signal_type} extreme RSI signal detected on {timeframe}: {extreme_rsi_signal.entry_price}")
-                return extreme_rsi_signal
+
+            try:
+
+                extreme_rsi_signal = self._detect_extreme_rsi_reversal(data, timeframe, symbol)
+
+                if extreme_rsi_signal and not self._is_duplicate_signal(extreme_rsi_signal) and not self._is_signal_stale(extreme_rsi_signal):
+
+                    self.signal_history.append(extreme_rsi_signal)
+
+                    logger.info(f"✓ Extreme RSI detected {extreme_rsi_signal.signal_type} signal on {timeframe}")
+
+                    
+
+                    if self.diagnostics:
+
+                        self.diagnostics.log_detection_attempt("Extreme RSI", True)
+
+                        self.diagnostics.log_signal_generated("Extreme RSI")
+
+                    
+
+                    return extreme_rsi_signal
+
+            except Exception as e:
+
+                logger.error(f"Error in Extreme RSI detection: {e}")
+
+                if self.diagnostics:
+
+                    self.diagnostics.log_detection_attempt("Extreme RSI", False, f"Error: {str(e)}")
+
+        
 
         # Check for H4 HVG signal on 4-hour timeframe
+
         if timeframe == '4h':
-            hvg_signal = self._detect_h4_hvg(data, timeframe, symbol)
-            if hvg_signal and not self._is_duplicate_signal(hvg_signal) and not self._is_signal_stale(hvg_signal):
-                self.signal_history.append(hvg_signal)
-                logger.info(f"H4 HVG {hvg_signal.signal_type} signal detected on {timeframe}: {hvg_signal.entry_price}")
-                return hvg_signal
+
+            try:
+
+                hvg_signal = self._detect_h4_hvg(data, timeframe, symbol)
+
+                if hvg_signal and not self._is_duplicate_signal(hvg_signal) and not self._is_signal_stale(hvg_signal):
+
+                    self.signal_history.append(hvg_signal)
+
+                    logger.info(f"✓ H4 HVG detected {hvg_signal.signal_type} signal on {timeframe}")
+
+                    
+
+                    if self.diagnostics:
+
+                        self.diagnostics.log_detection_attempt("H4 HVG", True)
+
+                        self.diagnostics.log_signal_generated("H4 HVG")
+
+                    
+
+                    return hvg_signal
+
+            except Exception as e:
+
+                logger.error(f"Error in H4 HVG detection: {e}")
+
+                if self.diagnostics:
+
+                    self.diagnostics.log_detection_attempt("H4 HVG", False, f"Error: {str(e)}")
+
+        
 
         return None
     
@@ -1275,17 +1529,17 @@ class SignalDetector:
 
         
 
-        Confluence factors:
+        Confluence factors (relaxed):
 
         1. Price > VWAP
 
-        2. EMA(9) crosses above EMA(21) in last 2 candles
+        2. EMA(9) > EMA(21) (no strict crossover required)
 
-        3. Volume > 1.5x volume MA
+        3. Volume > asset-specific threshold (default 1.3x)
 
-        4. RSI between 30 and 70
+        4. RSI between 25 and 75 (expanded range)
 
-        5. Price > EMA(50) for bullish bias
+        5. Price > EMA(50) for bullish bias (optional)
 
         
 
@@ -1294,6 +1548,8 @@ class SignalDetector:
             data: DataFrame with indicators
 
             timeframe: Timeframe string
+
+            symbol: Trading symbol
 
             
 
@@ -1319,6 +1575,20 @@ class SignalDetector:
 
             
 
+            # Get asset-specific configuration
+
+            asset_symbol = self._get_asset_symbol(symbol)
+
+            asset_config = self.config.get('asset_specific', {}).get(asset_symbol, {})
+
+            
+
+            # Get volume threshold (asset-specific or global)
+
+            volume_threshold = asset_config.get('volume_thresholds', {}).get('scalp', self.volume_spike_threshold)
+
+            
+
             confluence_count = 0
 
             
@@ -1329,57 +1599,67 @@ class SignalDetector:
 
                 confluence_count += 1
 
+                logger.debug(f"[{timeframe}] ✓ Price > VWAP: ${last['close']:.2f} > ${last['vwap']:.2f}")
+
             else:
+
+                logger.debug(f"[{timeframe}] ✗ Price <= VWAP: ${last['close']:.2f} <= ${last['vwap']:.2f}")
 
                 return None  # Critical factor
 
             
 
-            # Factor 2: EMA(9) crosses above EMA(21)
+            # Factor 2: EMA(9) > EMA(21) - RELAXED: no strict crossover required
 
-            ema_cross = (
-
-                last['ema_9'] > last['ema_21'] and
-
-                prev['ema_9'] <= prev['ema_21']
-
-            )
-
-            if ema_cross:
+            if last['ema_9'] > last['ema_21']:
 
                 confluence_count += 1
 
+                logger.debug(f"[{timeframe}] ✓ EMA9 > EMA21: {last['ema_9']:.2f} > {last['ema_21']:.2f}")
+
             else:
+
+                logger.debug(f"[{timeframe}] ✗ EMA9 <= EMA21: {last['ema_9']:.2f} <= {last['ema_21']:.2f}")
 
                 return None  # Critical factor
 
             
 
-            # Factor 3: Volume spike
+            # Factor 3: Volume spike (asset-specific threshold)
 
-            if last['volume'] > (last['volume_ma'] * self.volume_spike_threshold):
+            volume_ratio = last['volume'] / last['volume_ma']
+
+            if volume_ratio > volume_threshold:
 
                 confluence_count += 1
 
+                logger.debug(f"[{timeframe}] ✓ Volume: {volume_ratio:.2f}x > {volume_threshold}x")
+
             else:
+
+                logger.debug(f"[{timeframe}] ✗ Volume too low: {volume_ratio:.2f}x <= {volume_threshold}x")
 
                 return None  # Critical factor
 
             
 
-            # Factor 4: RSI in valid range
+            # Factor 4: RSI in valid range (expanded to 25-75)
 
             if self.rsi_min <= last['rsi'] <= self.rsi_max:
 
                 confluence_count += 1
 
+                logger.debug(f"[{timeframe}] ✓ RSI in range: {last['rsi']:.1f} ({self.rsi_min}-{self.rsi_max})")
+
             else:
+
+                logger.debug(f"[{timeframe}] ✗ RSI out of range: {last['rsi']:.1f} (need {self.rsi_min}-{self.rsi_max})")
 
                 return None  # Critical factor
 
             
 
-            # Factor 5: Bullish bias (price > EMA50)
+            # Factor 5: Bullish bias (price > EMA50) - OPTIONAL
 
             market_bias = "neutral"
 
@@ -1388,6 +1668,12 @@ class SignalDetector:
                 confluence_count += 1
 
                 market_bias = "bullish"
+
+                logger.debug(f"[{timeframe}] ✓ Price > EMA50: ${last['close']:.2f} > ${last['ema_50']:.2f}")
+
+            else:
+
+                logger.debug(f"[{timeframe}] ⚠ Price <= EMA50: ${last['close']:.2f} <= ${last['ema_50']:.2f} (optional factor)")
 
             
 
@@ -1484,17 +1770,17 @@ class SignalDetector:
 
         
 
-        Confluence factors:
+        Confluence factors (relaxed):
 
         1. Price < VWAP
 
-        2. EMA(9) crosses below EMA(21) in last 2 candles
+        2. EMA(9) < EMA(21) (no strict crossover required)
 
-        3. Volume > 1.5x volume MA
+        3. Volume > asset-specific threshold (default 1.3x)
 
-        4. RSI between 30 and 70
+        4. RSI between 25 and 75 (expanded range)
 
-        5. Price < EMA(50) for bearish bias
+        5. Price < EMA(50) for bearish bias (optional)
 
         
 
@@ -1503,6 +1789,8 @@ class SignalDetector:
             data: DataFrame with indicators
 
             timeframe: Timeframe string
+
+            symbol: Trading symbol
 
             
 
@@ -1528,6 +1816,20 @@ class SignalDetector:
 
             
 
+            # Get asset-specific configuration
+
+            asset_symbol = self._get_asset_symbol(symbol)
+
+            asset_config = self.config.get('asset_specific', {}).get(asset_symbol, {})
+
+            
+
+            # Get volume threshold (asset-specific or global)
+
+            volume_threshold = asset_config.get('volume_thresholds', {}).get('scalp', self.volume_spike_threshold)
+
+            
+
             confluence_count = 0
 
             
@@ -1538,57 +1840,67 @@ class SignalDetector:
 
                 confluence_count += 1
 
+                logger.debug(f"[{timeframe}] ✓ Price < VWAP: ${last['close']:.2f} < ${last['vwap']:.2f}")
+
             else:
+
+                logger.debug(f"[{timeframe}] ✗ Price >= VWAP: ${last['close']:.2f} >= ${last['vwap']:.2f}")
 
                 return None  # Critical factor
 
             
 
-            # Factor 2: EMA(9) crosses below EMA(21)
+            # Factor 2: EMA(9) < EMA(21) - RELAXED: no strict crossover required
 
-            ema_cross = (
-
-                last['ema_9'] < last['ema_21'] and
-
-                prev['ema_9'] >= prev['ema_21']
-
-            )
-
-            if ema_cross:
+            if last['ema_9'] < last['ema_21']:
 
                 confluence_count += 1
 
+                logger.debug(f"[{timeframe}] ✓ EMA9 < EMA21: {last['ema_9']:.2f} < {last['ema_21']:.2f}")
+
             else:
+
+                logger.debug(f"[{timeframe}] ✗ EMA9 >= EMA21: {last['ema_9']:.2f} >= {last['ema_21']:.2f}")
 
                 return None  # Critical factor
 
             
 
-            # Factor 3: Volume spike
+            # Factor 3: Volume spike (asset-specific threshold)
 
-            if last['volume'] > (last['volume_ma'] * self.volume_spike_threshold):
+            volume_ratio = last['volume'] / last['volume_ma']
+
+            if volume_ratio > volume_threshold:
 
                 confluence_count += 1
 
+                logger.debug(f"[{timeframe}] ✓ Volume: {volume_ratio:.2f}x > {volume_threshold}x")
+
             else:
+
+                logger.debug(f"[{timeframe}] ✗ Volume too low: {volume_ratio:.2f}x <= {volume_threshold}x")
 
                 return None  # Critical factor
 
             
 
-            # Factor 4: RSI in valid range
+            # Factor 4: RSI in valid range (expanded to 25-75)
 
             if self.rsi_min <= last['rsi'] <= self.rsi_max:
 
                 confluence_count += 1
 
+                logger.debug(f"[{timeframe}] ✓ RSI in range: {last['rsi']:.1f} ({self.rsi_min}-{self.rsi_max})")
+
             else:
+
+                logger.debug(f"[{timeframe}] ✗ RSI out of range: {last['rsi']:.1f} (need {self.rsi_min}-{self.rsi_max})")
 
                 return None  # Critical factor
 
             
 
-            # Factor 5: Bearish bias (price < EMA50)
+            # Factor 5: Bearish bias (price < EMA50) - OPTIONAL
 
             market_bias = "neutral"
 
@@ -1597,6 +1909,12 @@ class SignalDetector:
                 confluence_count += 1
 
                 market_bias = "bearish"
+
+                logger.debug(f"[{timeframe}] ✓ Price < EMA50: ${last['close']:.2f} < ${last['ema_50']:.2f}")
+
+            else:
+
+                logger.debug(f"[{timeframe}] ⚠ Price >= EMA50: ${last['close']:.2f} >= ${last['ema_50']:.2f} (optional factor)")
 
             
 

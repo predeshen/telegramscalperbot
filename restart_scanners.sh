@@ -7,7 +7,7 @@ echo "=========================================="
 echo
 
 # Define all scanner services
-LEGACY_SCANNERS="btc-scalp-scanner btc-swing-scanner gold-scalp-scanner gold-swing-scanner us30-scalp-scanner us30-swing-scanner us30-momentum-scanner"
+LEGACY_SCANNERS="btc-scalp-scanner btc-swing-scanner gold-scalp-scanner gold-swing-scanner us30-scalp-scanner us30-swing-scanner us30-momentum-scanner btc-us100-scanner"
 MULTI_SYMBOL_SCANNERS="multi-crypto-scalp-scanner multi-crypto-swing-scanner multi-fx-scalp-scanner multi-mixed-scanner"
 
 # Stop all services first

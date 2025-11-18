@@ -1,0 +1,23 @@
+[Unit]
+Description=US100/NASDAQ Trading Scanner
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/BTCUSDScanner
+Environment="PYTHONUNBUFFERED=1"
+ExecStart=/usr/bin/python3 /root/BTCUSDScanner/main_us100.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=us100-scanner
+
+# Resource limits
+MemoryLimit=512M
+CPUQuota=50%
+
+[Install]
+WantedBy=multi-user.target

@@ -23,6 +23,9 @@ from src.health_monitor import HealthMonitor, setup_logging
 from src.excel_reporter import ExcelReporter
 from src.trade_tracker import TradeTracker
 from src.news_calendar import NewsCalendar
+from src.signal_diagnostics import SignalDiagnostics
+from src.config_validator import ConfigValidator
+from src.bypass_mode import BypassMode
 
 
 logger = logging.getLogger(__name__)
@@ -54,6 +57,21 @@ class BTCScalpingScanner:
         
         # Initialize components
         self.health_monitor = HealthMonitor()
+        
+        # Initialize diagnostic system
+        self.diagnostics = SignalDiagnostics("BTC-Scalp")
+        logger.info("Diagnostic system initialized")
+        
+        # Validate configuration
+        validator = ConfigValidator()
+        config_dict = self.config.__dict__ if hasattr(self.config, '__dict__') else {}
+        warnings = validator.validate_config(config_dict)
+        if warnings:
+            for warning in warnings:
+                logger.warning(f"Config: {warning}")
+        
+        # Initialize bypass mode
+        self.bypass_mode = BypassMode(config_dict, None)  # Will set alerter later
         
         # Use HybridDataClient for hybrid exchange, otherwise use MarketDataClient
         if self.config.exchange.name == 'hybrid':
@@ -95,7 +113,8 @@ class BTCScalpingScanner:
             stop_loss_atr_multiplier=self.config.signal_rules.stop_loss_atr_multiplier,
             take_profit_atr_multiplier=self.config.signal_rules.take_profit_atr_multiplier,
             duplicate_time_window_minutes=self.config.signal_rules.duplicate_time_window_minutes,
-            duplicate_price_threshold_percent=self.config.signal_rules.duplicate_price_threshold_percent
+            duplicate_price_threshold_percent=self.config.signal_rules.duplicate_price_threshold_percent,
+            diagnostics=self.diagnostics
         )
         
         # Set config for new detection strategies
@@ -134,16 +153,17 @@ class BTCScalpingScanner:
             self.signal_detector.configure_h4_hvg(h4_hvg_config, self.config.exchange.symbol)
             logger.info("H4 HVG detection enabled for BTC scalping")
         
-        # Initialize Signal Quality Filter
+        # Initialize Signal Quality Filter with config values
+        quality_filter_config = getattr(self.config, 'quality_filter', {})
         quality_config = QualityConfig(
-            min_confluence_factors=4,
-            min_confidence_score=4,
-            duplicate_window_seconds=300,  # 5 minutes
-            duplicate_price_tolerance_pct=0.5,
-            significant_price_move_pct=1.0,
-            min_risk_reward=1.5
+            min_confluence_factors=quality_filter_config.get('min_confluence_factors', 3),
+            min_confidence_score=quality_filter_config.get('min_confidence_score', 3),
+            duplicate_window_seconds=quality_filter_config.get('duplicate_window_seconds', 600),
+            duplicate_price_tolerance_pct=quality_filter_config.get('duplicate_price_tolerance_pct', 1.0),
+            significant_price_move_pct=quality_filter_config.get('significant_price_move_pct', 1.5),
+            min_risk_reward=quality_filter_config.get('min_risk_reward', 1.2)
         )
-        self.quality_filter = SignalQualityFilter(quality_config)
+        self.quality_filter = SignalQualityFilter(quality_config, diagnostics=self.diagnostics)
         logger.info("Signal Quality Filter initialized")
         
         # Initialize Liquidity Filter
@@ -185,6 +205,9 @@ class BTCScalpingScanner:
             self.alerter = telegram_alerter
         else:
             raise RuntimeError("No alerter configured! Enable either email or Telegram.")
+        
+        # Set alerter for bypass mode
+        self.bypass_mode.alerter = self.alerter
         
         # WebSocket streamer
         self.ws_streamer = None

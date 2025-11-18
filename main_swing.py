@@ -14,9 +14,13 @@ from pathlib import Path
 from src.yfinance_client import YFinanceClient
 from src.indicator_calculator import IndicatorCalculator
 from src.signal_detector import SignalDetector
+from src.signal_quality_filter import SignalQualityFilter, QualityConfig
 from src.alerter import TelegramAlerter
 from src.trade_tracker import TradeTracker
 from src.excel_reporter import ExcelReporter
+from src.signal_diagnostics import SignalDiagnostics
+from src.config_validator import ConfigValidator
+from src.bypass_mode import BypassMode
 
 
 def setup_logging(log_file: str, log_level: str) -> None:
@@ -78,6 +82,20 @@ def main():
     logger.info("=" * 60)
     
     # Initialize components
+    # Initialize diagnostic system
+    diagnostics = SignalDiagnostics("BTC-Swing")
+    logger.info("Diagnostic system initialized")
+    
+    # Validate configuration
+    validator = ConfigValidator()
+    warnings = validator.validate_config(config)
+    if warnings:
+        for warning in warnings:
+            logger.warning(f"Config: {warning}")
+    
+    # Initialize bypass mode
+    bypass_mode = BypassMode(config, None)  # Will set alerter later
+    
     # Use YFinance for better data quality (especially volume)
     market_client = YFinanceClient(
         symbol=config['symbol'],
@@ -94,7 +112,8 @@ def main():
         stop_loss_atr_multiplier=config['signal_detection']['stop_loss_atr_multiplier'],
         take_profit_atr_multiplier=config['signal_detection']['take_profit_atr_multiplier'],
         duplicate_time_window_minutes=config['signal_detection']['duplicate_time_window_minutes'],
-        duplicate_price_threshold_percent=config['signal_detection']['duplicate_price_threshold_percent']
+        duplicate_price_threshold_percent=config['signal_detection']['duplicate_price_threshold_percent'],
+        diagnostics=diagnostics
     )
     
     # Set config for new detection strategies
@@ -119,6 +138,22 @@ def main():
             logger.info("Telegram alerter initialized")
         else:
             logger.warning("Telegram credentials not found in config or environment variables")
+    
+    # Set alerter for bypass mode
+    bypass_mode.alerter = alerter
+    
+    # Initialize quality filter
+    quality_filter_config = config.get('quality_filter', {})
+    quality_config = QualityConfig(
+        min_confluence_factors=quality_filter_config.get('min_confluence_factors', 3),
+        min_confidence_score=quality_filter_config.get('min_confidence_score', 3),
+        duplicate_window_seconds=quality_filter_config.get('duplicate_window_seconds', 3600),
+        duplicate_price_tolerance_pct=quality_filter_config.get('duplicate_price_tolerance_pct', 1.0),
+        significant_price_move_pct=quality_filter_config.get('significant_price_move_pct', 1.5),
+        min_risk_reward=quality_filter_config.get('min_risk_reward', 1.2)
+    )
+    quality_filter = SignalQualityFilter(quality_config, diagnostics=diagnostics)
+    logger.info("Signal Quality Filter initialized")
     
     # Initialize trade tracker
     trade_tracker = TradeTracker(alerter=alerter)

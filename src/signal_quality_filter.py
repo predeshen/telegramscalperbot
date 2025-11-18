@@ -18,12 +18,12 @@ logger = logging.getLogger(__name__)
 @dataclass
 class QualityConfig:
     """Configuration for signal quality filter"""
-    min_confluence_factors: int = 4  # Increased from 3 to 4
-    min_confidence_score: int = 4  # Increased from 3 to 4
-    duplicate_window_seconds: int = 300  # 5 minutes for scalp
-    duplicate_price_tolerance_pct: float = 0.5  # 0.5% price tolerance
-    significant_price_move_pct: float = 1.0  # 1.0% move allows new signal
-    min_risk_reward: float = 1.5  # Minimum risk-reward ratio
+    min_confluence_factors: int = 3  # Reduced from 4 to 3
+    min_confidence_score: int = 3  # Reduced from 4 to 3
+    duplicate_window_seconds: int = 600  # 10 minutes (increased from 5)
+    duplicate_price_tolerance_pct: float = 1.0  # 1.0% price tolerance (increased from 0.5%)
+    significant_price_move_pct: float = 1.5  # 1.5% move allows new signal (increased from 1.0%)
+    min_risk_reward: float = 1.2  # Minimum risk-reward ratio (reduced from 1.5)
     confluence_weights: Optional[Dict[str, float]] = None
     
     def __post_init__(self):
@@ -57,15 +57,17 @@ class SignalQualityFilter:
     Filters signals based on quality criteria and confidence scoring
     """
     
-    def __init__(self, config: Optional[QualityConfig] = None):
+    def __init__(self, config: Optional[QualityConfig] = None, diagnostics=None):
         """
         Initialize signal quality filter
         
         Args:
             config: QualityConfig with filtering thresholds
+            diagnostics: Optional SignalDiagnostics instance for tracking
         """
         self.config = config or QualityConfig()
         self.recent_signals: Dict[str, List[Tuple[datetime, Signal]]] = {}
+        self.diagnostics = diagnostics
         
         logger.info(f"Initialized SignalQualityFilter: "
                    f"min_confluence={self.config.min_confluence_factors}, "
@@ -104,12 +106,17 @@ class SignalQualityFilter:
         rr_valid, rr_ratio = self.validate_risk_reward(signal)
         
         if not rr_valid:
+            reason = f"Risk-reward ratio too low: {rr_ratio:.2f} < {self.config.min_risk_reward}"
             logger.info(f"Signal rejected - poor risk-reward: {rr_ratio:.2f} < {self.config.min_risk_reward}")
+            
+            if self.diagnostics:
+                self.diagnostics.log_detection_attempt("Quality Filter", False, reason)
+            
             return FilterResult(
                 passed=False,
                 confidence_score=confidence_score,
                 confluence_factors=confluence_factors,
-                rejection_reason=f"Risk-reward ratio too low: {rr_ratio:.2f} < {self.config.min_risk_reward}"
+                rejection_reason=reason
             )
         
         # Adjust confidence score based on risk-reward
@@ -122,28 +129,46 @@ class SignalQualityFilter:
         
         # Check if signal passes minimum confluence threshold
         if len(confluence_factors) < self.config.min_confluence_factors:
+            missing = [k for k, v in confluence_dict.items() if not v]
+            reason = f"Insufficient confluence factors: {len(confluence_factors)}/{self.config.min_confluence_factors} (missing: {', '.join(missing)})"
+            
             logger.info(f"Signal rejected - insufficient confluence: {len(confluence_factors)} < {self.config.min_confluence_factors}")
-            logger.info(f"Missing factors: {[k for k, v in confluence_dict.items() if not v]}")
+            logger.info(f"  Factors met: {', '.join(confluence_factors)}")
+            logger.info(f"  Factors missing: {', '.join(missing)}")
+            
+            if self.diagnostics:
+                self.diagnostics.log_detection_attempt("Quality Filter", False, reason)
+            
             return FilterResult(
                 passed=False,
                 confidence_score=confidence_score,
                 confluence_factors=confluence_factors,
-                rejection_reason=f"Insufficient confluence factors: {len(confluence_factors)}/{self.config.min_confluence_factors} (missing: {', '.join([k for k, v in confluence_dict.items() if not v])})"
+                rejection_reason=reason
             )
         
         # Check if signal passes minimum confidence threshold
         if confidence_score < self.config.min_confidence_score:
+            reason = f"Low confidence score: {confidence_score} < {self.config.min_confidence_score}"
             logger.info(f"Signal rejected - low confidence: {confidence_score} < {self.config.min_confidence_score}")
+            
+            if self.diagnostics:
+                self.diagnostics.log_detection_attempt("Quality Filter", False, reason)
+            
             return FilterResult(
                 passed=False,
                 confidence_score=confidence_score,
                 confluence_factors=confluence_factors,
-                rejection_reason=f"Low confidence score: {confidence_score} < {self.config.min_confidence_score}"
+                rejection_reason=reason
             )
         
         # Check for duplicates
         if self.check_duplicate(signal):
+            reason = "Duplicate signal within time window"
             logger.info(f"Signal rejected - duplicate within time window")
+            
+            if self.diagnostics:
+                self.diagnostics.log_detection_attempt("Quality Filter", False, reason)
+            
             return FilterResult(
                 passed=False,
                 confidence_score=confidence_score,
@@ -154,6 +179,9 @@ class SignalQualityFilter:
         # Signal passed all checks
         logger.info(f"✓ Signal passed quality filter: {len(confluence_factors)}/7 factors, confidence={confidence_score}/5, R:R={rr_ratio:.2f}")
         logger.info(f"  Factors met: {', '.join(confluence_factors)}")
+        
+        if self.diagnostics:
+            self.diagnostics.log_detection_attempt("Quality Filter", True)
         
         return FilterResult(
             passed=True,
@@ -337,18 +365,31 @@ class SignalQualityFilter:
             if prev_signal.signal_type != signal.signal_type:
                 continue
             
+            # Allow if different timeframe (NEW RULE)
+            if hasattr(prev_signal, 'timeframe') and hasattr(signal, 'timeframe'):
+                if prev_signal.timeframe != signal.timeframe:
+                    logger.debug(f"Different timeframe ({prev_signal.timeframe} vs {signal.timeframe}), allowing signal")
+                    continue
+            
             # Check time window
             time_diff = signal.timestamp - timestamp
             if time_diff < time_threshold:
                 # Check price proximity (within tolerance)
                 price_diff_pct = abs(signal.entry_price - prev_signal.entry_price) / prev_signal.entry_price * 100
                 
-                # Allow new signal if price moved significantly
+                # Allow new signal if price moved significantly (1.5%)
                 if price_diff_pct >= self.config.significant_price_move_pct:
                     logger.debug(f"Significant price move ({price_diff_pct:.2f}%), allowing new signal")
                     continue
                 
-                # Check if within duplicate tolerance
+                # Allow if RSI changed significantly (NEW RULE)
+                if 'rsi' in signal.indicators and 'rsi' in prev_signal.indicators:
+                    rsi_diff = abs(signal.indicators['rsi'] - prev_signal.indicators['rsi'])
+                    if rsi_diff >= 15:
+                        logger.debug(f"Significant RSI change ({rsi_diff:.1f}), allowing signal")
+                        continue
+                
+                # Check if within duplicate tolerance (1.0%)
                 if price_diff_pct < self.config.duplicate_price_tolerance_pct:
                     logger.info(f"Duplicate signal detected for {symbol}: {signal.signal_type} within {time_diff.seconds}s, price diff {price_diff_pct:.2f}%")
                     logger.info(f"  Previous: {prev_signal.entry_price:.2f} @ {timestamp}")

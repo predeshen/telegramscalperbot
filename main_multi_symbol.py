@@ -13,6 +13,9 @@ from datetime import datetime
 from src.asset_config_manager import AssetConfigManager
 from src.symbol_orchestrator import SymbolOrchestrator
 from src.alerter import TelegramAlerter, EmailAlerter, MultiAlerter
+from src.signal_diagnostics import SignalDiagnostics
+from src.config_validator import ConfigValidator
+from src.bypass_mode import BypassMode
 
 
 def setup_logging(log_level: str = "INFO") -> None:
@@ -74,6 +77,21 @@ def main():
         logger.info(f"Configuration loaded: {summary['total_symbols']} symbols, "
                    f"{summary['enabled_symbols']} enabled")
         
+        # Initialize diagnostic system
+        diagnostics = SignalDiagnostics("Multi-Symbol-Scanner")
+        logger.info("Diagnostic system initialized")
+        
+        # Validate configuration
+        validator = ConfigValidator()
+        config_dict = config_manager.config  # Get the raw config dict
+        warnings = validator.validate_config(config_dict)
+        if warnings:
+            for warning in warnings:
+                logger.warning(f"Config: {warning}")
+        
+        # Initialize bypass mode
+        bypass_mode = BypassMode(config_dict, None)  # Will set alerter later
+        
         # Initialize alerter
         # Use environment variables (same as other scanners)
         telegram_bot_token = os.getenv('TELEGRAM_BOT_TOKEN')
@@ -90,11 +108,16 @@ def main():
             logger.error("Telegram alerter not configured properly!")
             sys.exit(1)
         
-        # Create orchestrator
+        # Set alerter for bypass mode
+        bypass_mode.alerter = alerter
+        
+        # Create orchestrator with diagnostics
         orchestrator = SymbolOrchestrator(
             config_manager=config_manager,
             alerter=alerter,
-            max_concurrent_symbols=config_manager.get_global_setting('max_concurrent_symbols', 10)
+            max_concurrent_symbols=config_manager.get_global_setting('max_concurrent_symbols', 10),
+            diagnostics=diagnostics,
+            bypass_mode=bypass_mode
         )
         
         # Add all enabled symbols
