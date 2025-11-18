@@ -1,17 +1,24 @@
 [Unit]
 Description=US30 Momentum Trading Scanner
 After=network.target
+Wants=network-online.target
 
 [Service]
 Type=simple
-User=ubuntu
-WorkingDirectory=/home/ubuntu/trading-bot
-Environment="PATH=/home/ubuntu/trading-bot/venv/bin:/usr/local/bin:/usr/bin:/bin"
-ExecStart=/home/ubuntu/trading-bot/venv/bin/python3 /home/ubuntu/trading-bot/main_us30.py
+User=predeshen
+Group=predeshen
+WorkingDirectory=/home/predeshen/telegramscalperbot
+Environment="PYTHONUNBUFFERED=1"
+ExecStart=/usr/bin/python3 /home/predeshen/telegramscalperbot/main_us30.py
 Restart=always
 RestartSec=10
-StandardOutput=append:/home/ubuntu/trading-bot/logs/us30_scanner.log
-StandardError=append:/home/ubuntu/trading-bot/logs/us30_scanner.log
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=us30-momentum-scanner
+
+# Resource limits
+MemoryLimit=512M
+CPUQuota=50%
 
 [Install]
 WantedBy=multi-user.target
