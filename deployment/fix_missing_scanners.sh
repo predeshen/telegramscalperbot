@@ -1,5 +1,5 @@
 #!/bin/bash
-# Fix Missing Scanner Services - Permissions and Configuration
+# Fix Missing Scanner Services - Reinstall with correct paths
 # Run with: sudo bash deployment/fix_missing_scanners.sh
 
 set -e
@@ -35,21 +35,19 @@ chmod -R 755 "$PROJECT_DIR/logs"
 chmod -R 755 "$PROJECT_DIR/config"
 echo "✓ Permissions fixed"
 
-# Update service files to run as root (since we're running as root)
+# Reinstall service files with correct paths
 echo
-echo "Updating service configurations..."
+echo "Reinstalling service files..."
 
-# Update multi-crypto-scanner.service
-sed -i "s|User=ubuntu|User=root|g" /etc/systemd/system/multi-crypto-scanner.service
-sed -i "s|Group=ubuntu|Group=root|g" /etc/systemd/system/multi-crypto-scanner.service
-sed -i "s|/home/ubuntu/telegramscalperbot|$PROJECT_DIR|g" /etc/systemd/system/multi-crypto-scanner.service
-echo "✓ Updated multi-crypto-scanner.service"
+# Process multi-crypto-scanner.service
+sed -e "s|/home/ubuntu/telegramscalperbot|$PROJECT_DIR|g" \
+    "$SCRIPT_DIR/multi-crypto-scanner.service" > /etc/systemd/system/multi-crypto-scanner.service
+echo "✓ Installed multi-crypto-scanner.service"
 
-# Update us100-scanner.service
-sed -i "s|User=ubuntu|User=root|g" /etc/systemd/system/us100-scanner.service
-sed -i "s|Group=ubuntu|Group=root|g" /etc/systemd/system/us100-scanner.service
-sed -i "s|/home/ubuntu/telegramscalperbot|$PROJECT_DIR|g" /etc/systemd/system/us100-scanner.service
-echo "✓ Updated us100-scanner.service"
+# Process us100-scanner.service
+sed -e "s|/home/ubuntu/telegramscalperbot|$PROJECT_DIR|g" \
+    "$SCRIPT_DIR/us100-scanner.service" > /etc/systemd/system/us100-scanner.service
+echo "✓ Installed us100-scanner.service"
 
 # Reload systemd
 echo

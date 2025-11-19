@@ -1,35 +1,35 @@
 [Unit]
 Description=US100/NASDAQ Trading Scanner (5m/15m/1h timeframes)
-Documentation=file:///home/ubuntu/telegramscalperbot/DEPLOYMENT_GUIDE.md
+Documentation=file:///home/predeshen/telegramscalperbot/DEPLOYMENT_GUIDE.md
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-User=ubuntu
-Group=ubuntu
-WorkingDirectory=/home/ubuntu/telegramscalperbot
-ExecStart=/usr/bin/python3 /home/ubuntu/telegramscalperbot/main_us100.py
+User=root
+Group=root
+WorkingDirectory=/home/predeshen/telegramscalperbot
+ExecStart=/usr/bin/python3 /home/predeshen/telegramscalperbot/main_us100.py
 Restart=always
 RestartSec=10
 StartLimitInterval=300
 StartLimitBurst=5
 
 # Logging
-StandardOutput=append:/home/ubuntu/telegramscalperbot/logs/us100_scanner.log
-StandardError=append:/home/ubuntu/telegramscalperbot/logs/us100_scanner.log
+StandardOutput=append:/home/predeshen/telegramscalperbot/logs/us100_scanner.log
+StandardError=append:/home/predeshen/telegramscalperbot/logs/us100_scanner.log
 
 # Environment variables
 Environment="PYTHONUNBUFFERED=1"
 Environment="PYTHONDONTWRITEBYTECODE=1"
-EnvironmentFile=/home/ubuntu/telegramscalperbot/.env
+EnvironmentFile=/home/predeshen/telegramscalperbot/.env
 
 # Security hardening
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=strict
-ProtectHome=yes
-ReadWritePaths=/home/ubuntu/telegramscalperbot/logs /home/ubuntu/telegramscalperbot/config
+NoNewPrivileges=false
+PrivateTmp=false
+ProtectSystem=no
+ProtectHome=no
+ReadWritePaths=/home/predeshen/telegramscalperbot/logs /home/predeshen/telegramscalperbot/config
 
 # Resource limits
 LimitNOFILE=4096
