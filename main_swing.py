@@ -189,7 +189,7 @@ def main():
     candle_data = {}
     for timeframe in config['timeframes']:
         logger.info(f"Fetching initial candlestick data for {timeframe}...")
-        candles = market_client.get_latest_candles(timeframe, count=500)
+        candles, is_fresh = market_client.get_latest_candles(timeframe, count=500)
         
         # Calculate indicators
         candles['ema_9'] = indicator_calc.calculate_ema(candles, 9)
@@ -249,7 +249,7 @@ def main():
             for timeframe in config['timeframes']:
                 try:
                     # Fetch latest candles
-                    candles = market_client.get_latest_candles(timeframe, count=500)
+                    candles, is_fresh = market_client.get_latest_candles(timeframe, count=500)
                     
                     # Calculate indicators
                     candles['ema_9'] = indicator_calc.calculate_ema(candles, 9)
