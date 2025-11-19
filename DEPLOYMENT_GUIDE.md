@@ -1,212 +1,123 @@
-# Deployment Guide - Signal Detection Fix
+# Scanner Deployment & Troubleshooting Guide
 
-## 🚀 Quick Deployment
+## Quick Fix Deployment (From Local Machine)
 
-### Option 1: Restart All Scanners (Recommended)
+### Step 1: Deploy the US100 Fix
 ```bash
-sudo bash restart_scanners.sh
+# Run this on your LOCAL machine
+./deploy_fixes.sh
 ```
-This will restart all 9 scanners with the new configuration.
 
-### Option 2: Install US100 Scanner Only
+This will:
+- Commit the US100/NASDAQ symbol support fix
+- Push changes to your repository
+
+### Step 2: Apply Fixes on Cloud VM
 ```bash
-sudo bash install_us100_scanner.sh
+# SSH into your cloud VM, then run:
+cd ~/telegramscalperbot
+./restart_scanners.sh
 ```
 
-### Option 3: Clean Restart (Deletes All Logs)
+This will:
+- Pull latest code (including US100 fix)
+- Stop all scanners gracefully
+- Start all scanners with fixes applied
+- Show status of all services
+- Display logs for any failed services
+
+---
+
+## Current Issues Fixed
+
+### ✅ US100/NASDAQ Symbol Support
+**Problem**: US100 scanner showing "Unknown symbol 'US100', defaulting to BTC"
+
+**Fix Applied**:
+- Added US100 to `src/symbol_context.py` with proper NASDAQ configuration
+- Added US100 to symbol maps in `src/signal_detector.py`
+- US100 now properly recognized as NASDAQ index (^IXIC)
+
+---
+
+## Troubleshooting Failed Scanners
+
+### Check Individual Scanner Status
 ```bash
-sudo bash clean_and_restart.sh
+sudo systemctl status btc-scalp-scanner
+sudo systemctl status btc-swing-scanner
 ```
-⚠️ **Warning:** This deletes all historical data!
 
-## 📋 Pre-Deployment Checklist
-
-- [x] Configuration files updated (7 files)
-- [x] Diagnostic modules created (3 files)
-- [x] SignalDetector updated
-- [x] SignalQualityFilter updated
-- [x] main.py integrated (BTC Scalp)
-- [x] main_swing.py integrated (BTC Swing)
-- [x] main_us30.py integrated (US30)
-- [x] main_us100.py created (US100)
-- [x] Management scripts updated
-- [x] Tests run (237/252 passed)
-
-## 🎯 Scanners Ready for Deployment
-
-### Fully Integrated (9 Scanners):
-1. ✅ **BTC Scalp** (main.py) - 1m, 5m, 15m, 4h
-2. ✅ **BTC Swing** (main_swing.py) - 15m, 1h, 4h, 1d
-3. ✅ **US30 Momentum** (main_us30.py) - 1m, 5m, 15m
-4. ✅ **US100/NASDAQ** (main_us100.py) - 1m, 5m, 15m, 4h
-5. ✅ **Multi-Crypto Scalp** - Multiple crypto pairs
-6. ✅ **Multi-Crypto Swing** - Multiple crypto pairs
-7. ✅ **Multi-FX Scalp** - EUR/USD, GBP/USD
-8. ✅ **Multi-Mixed** - BTC, ETH, EUR/USD
-9. ✅ **Gold Scanners** - XAU/USD scalp & swing
-
-## 📊 Expected Performance
-
-### Signal Generation (Daily):
-| Scanner | Before | After | Improvement |
-|---------|--------|-------|-------------|
-| BTC Scalp | 0-1 | 5-10 | 10x |
-| BTC Swing | 0-1 | 2-5 | 5x |
-| US30 | 0-1 | 3-6 | 6x |
-| US100 | N/A | 5-10 | NEW |
-| Multi-Crypto | 0-2 | 8-15 | 7x |
-| Multi-FX | 0-1 | 3-6 | 6x |
-| Gold | 0-2 | 6-10 | 5x |
-| **TOTAL** | **0-8** | **32-62** | **8x** |
-
-## 🔧 Post-Deployment Steps
-
-### 1. Verify All Services Running
+### View Real-Time Logs
 ```bash
-sudo bash status_scanners.sh
+# Monitor specific scanner
+sudo journalctl -u btc-us100-scanner -f
+
+# View last 50 lines
+sudo journalctl -u btc-scalp-scanner -n 50
 ```
 
-Expected output:
-```
-✓ btc-scalp-scanner: RUNNING
-✓ btc-swing-scanner: RUNNING
-✓ gold-scalp-scanner: RUNNING
-✓ gold-swing-scanner: RUNNING
-✓ us30-scalp-scanner: RUNNING
-✓ us30-swing-scanner: RUNNING
-✓ us30-momentum-scanner: RUNNING
-✓ btc-us100-scanner: RUNNING
-✓ multi-crypto-scalp-scanner: RUNNING
-```
+### Common Issues
 
-### 2. Check Telegram
-You should receive startup messages from all scanners within 1 minute.
+#### 1. Scanner Exits with Code 1
+**Symptoms**: Service shows "activating (auto-restart)" or "exit-code"
 
-### 3. Monitor Logs (First Hour)
+**Diagnosis**:
 ```bash
-# Watch all scanners
-tail -f logs/*.log
-
-# Or individual scanners
-tail -f logs/scanner.log          # BTC Scalp
-tail -f logs/scanner_swing.log    # BTC Swing
-tail -f logs/us30_momentum_scanner.log  # US30
-tail -f logs/us100_scanner.log    # US100
+sudo journalctl -u btc-scalp-scanner -n 100
 ```
 
-### 4. Check for Signals
-Within the first hour, you should see:
-- Detection attempts logged
-- Strategy evaluations
-- Quality filter checks
-- Signals being generated
+**Common Causes**:
+- Missing configuration file
+- Invalid Telegram credentials
+- Python dependency issues
+- Symbol configuration errors
 
-### 5. Review Diagnostic Output
-Look for these patterns in logs:
-```
-✓ Momentum Shift detected LONG signal on 5m
-✗ Trend Alignment no signal
-✓ Signal passed quality filter: 4/7 factors, confidence=3/5
-```
+#### 2. No Signals/Heartbeats After Startup
+**Symptoms**: Scanner runs but no Telegram messages
 
-## 🐛 Troubleshooting
+**Check**:
+- Verify Telegram bot token in config
+- Check if bot is blocked or chat_id is wrong
+- Look for "Failed to send message" in logs
+- Verify market is open (for indices/forex)
 
-### Service Won't Start
+#### 3. Memory Limit Warnings
+**Symptoms**: "Unit uses MemoryLimit=; please use MemoryMax="
+
+**Fix**: Update systemd service files to use MemoryMax instead of MemoryLimit
+
+---
+
+## Monitoring Commands
+
+### Quick Status Check
 ```bash
-# Check service status
-sudo systemctl status btc-us100-scanner
-
-# Check logs
-sudo journalctl -u btc-us100-scanner -n 50
-
-# Test manually
-python main_us100.py
+./status_scanners.sh
 ```
 
-### No Signals Generated
-1. Check logs for detection attempts
-2. Check data quality issues
-3. Review diagnostic recommendations
-4. Consider enabling bypass mode temporarily
-
-### Configuration Errors
+### Check All Scanner Logs
 ```bash
-# Validate config
-python -c "import json; json.load(open('config/us100_config.json'))"
-
-# Check for warnings
-grep "Config:" logs/us100_scanner.log
+# View all scanner logs from last hour
+sudo journalctl --since "1 hour ago" | grep -E "scanner|signal|alert"
 ```
 
-## 📈 Monitoring
-
-### Real-Time Monitoring
+### Monitor System Resources
 ```bash
-# All scanners
-watch -n 5 'sudo systemctl status btc-*-scanner --no-pager | grep Active'
+# Check memory usage
+free -h
 
-# Signal count
-grep "signal detected" logs/*.log | wc -l
+# Check CPU usage
+top -b -n 1 | head -20
 ```
 
-### Daily Checks
-1. Check Telegram for heartbeat messages (every 90 min)
-2. Review signal count per scanner
-3. Check diagnostic recommendations
-4. Monitor win rate and R:R
+---
 
-## 🔄 Rollback Plan
+## Emergency Procedures
 
-If issues occur:
-
-### 1. Stop All Scanners
+### Stop All Scanners
 ```bash
-sudo systemctl stop btc-*-scanner multi-*-scanner
-```
-
-### 2. Restore Old Configuration
-```bash
-# Backup current configs
-cp config/*.json config/backup/
-
-# Restore from git (if tracked)
-git checkout config/*.json
-```
-
-### 3. Restart with Old Config
-```bash
-sudo bash restart_scanners.sh
-```
-
-## ✅ Success Criteria
-
-After 24 hours, verify:
-- [ ] All 9 scanners running without crashes
-- [ ] 30-60 signals generated total
-- [ ] No Python errors in logs
-- [ ] Diagnostic system logging properly
-- [ ] Quality filter working correctly
-- [ ] Telegram alerts being sent
-- [ ] Trade tracking functioning
-
-## 📞 Support Commands
-
-### Check Everything
-```bash
-# Service status
-sudo bash status_scanners.sh
-
-# Recent signals
-grep "signal detected" logs/*.log | tail -20
-
-# Recent rejections
-grep "rejected" logs/*.log | tail -20
-
-# Data quality issues
-grep "Data quality" logs/*.log | tail -10
-
-# Diagnostic summaries
-grep "Diagnostic Report" logs/*.log | tail -5
+sudo systemctl stop btc-scalp-scanner btc-swing-scanner gold-scalp-scanner gold-swing-scanner us30-scalp-scanner us30-swing-scanner us30-momentum-scanner btc-us100-scanner multi-crypto-scalp-scanner multi-crypto-swing-scanner multi-fx-scalp-scanner multi-mixed-scanner
 ```
 
 ### Restart Individual Scanner
@@ -215,25 +126,36 @@ sudo systemctl restart btc-us100-scanner
 sudo journalctl -u btc-us100-scanner -f
 ```
 
-### Emergency Stop All
+### Reload Systemd After Config Changes
 ```bash
-sudo systemctl stop btc-*-scanner multi-*-scanner
+sudo systemctl daemon-reload
 ```
 
-## 🎉 Deployment Complete!
+---
 
-Your trading system is now:
-- ✅ **9 scanners** monitoring multiple assets
-- ✅ **Relaxed thresholds** for more signal generation
-- ✅ **Full diagnostic visibility** into detection process
-- ✅ **Quality filtering** to maintain standards
-- ✅ **US100/NASDAQ** coverage with H4-HVG
-- ✅ **Easy management** with updated scripts
+## Next Steps After Deployment
 
-**Run the deployment command and start trading!**
+1. **Verify US100 Scanner**: Check that "Unknown symbol" warning is gone
+   ```bash
+   sudo journalctl -u btc-us100-scanner -f
+   ```
 
-```bash
-sudo bash restart_scanners.sh
-```
+2. **Monitor for Signals**: Wait for market activity and verify alerts come through
 
-Monitor Telegram for signals! 🎯📈
+3. **Check Failed Scanners**: Investigate btc-scalp-scanner and btc-swing-scanner failures
+   ```bash
+   sudo journalctl -u btc-scalp-scanner -n 100
+   sudo journalctl -u btc-swing-scanner -n 100
+   ```
+
+4. **Test Heartbeat**: Verify heartbeat messages are being sent to Telegram
+
+---
+
+## Support
+
+If issues persist after applying fixes:
+1. Check logs for specific error messages
+2. Verify all configuration files are present
+3. Ensure Python dependencies are installed
+4. Check network connectivity to data sources

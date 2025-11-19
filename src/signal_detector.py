@@ -312,7 +312,8 @@ class SignalDetector:
             "BTC": "BTC",
             "XAU/USD": "XAUUSD",
             "XAUUSD": "XAUUSD",
-            "US30": "US30"
+            "US30": "US30",
+            "US100": "US100"
         }
         
         internal_symbol = symbol_map.get(symbol, symbol)
@@ -339,7 +340,8 @@ class SignalDetector:
             "BTC": "BTC",
             "XAU/USD": "XAUUSD",
             "XAUUSD": "XAUUSD",
-            "US30": "US30"
+            "US30": "US30",
+            "US100": "US100"
         }
         
         return symbol_map.get(symbol, "BTC")

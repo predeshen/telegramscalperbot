@@ -34,7 +34,8 @@ class SymbolContext:
         emoji_map = {
             "BTC": "₿",
             "XAUUSD": "🥇",
-            "US30": "📊"
+            "US30": "📊",
+            "US100": "💹"
         }
         return emoji_map.get(self.symbol, "📈")
     
@@ -87,6 +88,11 @@ class SymbolContext:
                 "display_name": "US30",
                 "asset_type": "index",
                 "yf_symbol": "^DJI"
+            },
+            "US100": {
+                "display_name": "US100/NASDAQ",
+                "asset_type": "index",
+                "yf_symbol": "^IXIC"
             }
         }
         
