@@ -100,8 +100,8 @@ def main():
     
     indicator_calc = IndicatorCalculator()
     
-    # Initialize US30 strategy with diagnostics
-    us30_strategy = US30Strategy(config=config, diagnostics=diagnostics)
+    # Initialize US30 strategy
+    us30_strategy = US30Strategy(config=config)
     
     # Initialize alerter
     alerter = None
