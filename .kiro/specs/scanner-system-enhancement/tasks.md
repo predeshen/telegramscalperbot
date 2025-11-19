@@ -161,7 +161,12 @@
 
 
 
-- [ ] 15. Create systemd service files for all scanners
+- [x] 15. Create systemd service files for all scanners
+
+
+
+
+
   - Create `btc-scalp-scanner.service` with proper dependencies
   - Create `btc-swing-scanner.service` with proper dependencies
   - Create `gold-scalp-scanner.service` with proper dependencies
@@ -177,7 +182,12 @@
 
 
 
-- [ ] 16. Remove unused documentation and shell scripts
+- [x] 16. Remove unused documentation and shell scripts
+
+
+
+
+
   - Delete all unused .md files (keep only README.md and DEPLOYMENT_GUIDE.md)
   - Delete all unused .sh files (keep only deployment scripts from Phase 6)
   - Remove obsolete configuration files
@@ -187,7 +197,12 @@
 
 
 
-- [ ] 17. Consolidate duplicate code and organize structure
+
+
+- [x] 17. Consolidate duplicate code and organize structure
+
+
+
   - Move scanner-specific code to unified `scanners/` directory
   - Consolidate strategy implementations into single modules
   - Remove duplicate utility functions
@@ -208,7 +223,12 @@
   - _Requirements: 1.1, 3.1, 5.1, 6.1, 12.1_
 
 
-- [ ] 19. Create integration tests
+- [x] 19. Create integration tests
+
+
+
+
+
   - Write end-to-end signal detection flow tests
   - Write data source fallback logic tests
   - Write multi-scanner coordination tests

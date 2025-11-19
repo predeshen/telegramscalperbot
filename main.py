@@ -417,89 +417,89 @@ class BTCScalpingScanner:
                             continue
                         
                         # Process data (we know it's not empty and fresh here)
-                            # Update health monitor
-                            self.health_monitor.update_data_timestamp(df.iloc[-1]['timestamp'])
+                        # Update health monitor
+                        self.health_monitor.update_data_timestamp(df.iloc[-1]['timestamp'])
+                        
+                        # Calculate indicators
+                        data_with_indicators = self.indicator_calculator.calculate_all_indicators(
+                            df,
+                            ema_periods=[
+                                self.config.indicators.ema_fast,
+                                self.config.indicators.ema_slow,
+                                self.config.indicators.ema_trend,
+                                100,
+                                200
+                            ],
+                            atr_period=self.config.indicators.atr_period,
+                            rsi_period=self.config.indicators.rsi_period,
+                            volume_ma_period=self.config.indicators.volume_ma_period
+                        )
+                        
+                        if not data_with_indicators.empty:
+                            # Detect signals
+                            signal = self.signal_detector.detect_signals(data_with_indicators, timeframe)
                             
-                            # Calculate indicators
-                            data_with_indicators = self.indicator_calculator.calculate_all_indicators(
-                                df,
-                                ema_periods=[
-                                    self.config.indicators.ema_fast,
-                                    self.config.indicators.ema_slow,
-                                    self.config.indicators.ema_trend,
-                                    100,
-                                    200
-                                ],
-                                atr_period=self.config.indicators.atr_period,
-                                rsi_period=self.config.indicators.rsi_period,
-                                volume_ma_period=self.config.indicators.volume_ma_period
-                            )
+                            # Log scan result to Excel
+                            if self.excel_reporter:
+                                last_row = data_with_indicators.iloc[-1]
+                                # Determine scanner name based on strategy
+                                scanner_name = 'BTC-Scalp'
+                                if signal and getattr(signal, 'strategy', '') == 'H4 HVG':
+                                    scanner_name = 'BTC-Scalp-H4HVG'
+                                
+                                scan_data = {
+                                    'timestamp': datetime.now(),
+                                    'scanner': scanner_name,
+                                    'symbol': self.config.exchange.symbol,
+                                    'timeframe': timeframe,
+                                    'price': last_row['close'],
+                                    'volume': last_row['volume'],
+                                    'indicators': {
+                                        'ema_9': last_row.get('ema_9', None),
+                                        'ema_21': last_row.get('ema_21', None),
+                                        'ema_50': last_row.get('ema_50', None),
+                                        'ema_100': last_row.get('ema_100', None),
+                                        'ema_200': last_row.get('ema_200', None),
+                                        'rsi': last_row.get('rsi', None),
+                                        'atr': last_row.get('atr', None),
+                                        'volume_ma': last_row.get('volume_ma', None)
+                                    },
+                                    'signal_detected': signal is not None,
+                                    'signal_type': signal.signal_type if signal else None,
+                                    'signal_details': {
+                                        'entry_price': signal.entry_price,
+                                        'stop_loss': signal.stop_loss,
+                                        'take_profit': signal.take_profit,
+                                        'risk_reward': signal.risk_reward,
+                                        'strategy': getattr(signal, 'strategy', 'N/A'),
+                                        'gap_size_percent': getattr(signal, 'gap_info', {}).gap_percent if signal and hasattr(signal, 'gap_info') and signal.gap_info else None,
+                                        'volume_spike_ratio': getattr(signal, 'volume_spike_ratio', None) if signal else None,
+                                        'confluence_factors': len(getattr(signal, 'confluence_factors', [])) if signal and hasattr(signal, 'confluence_factors') and signal.confluence_factors else None
+                                    } if signal else {}
+                                }
+                                self.excel_reporter.log_scan_result(scan_data)
                             
-                            if not data_with_indicators.empty:
-                                # Detect signals
-                                signal = self.signal_detector.detect_signals(data_with_indicators, timeframe)
+                            if signal:
+                                logger.info(f"🎯 Signal detected: {signal.signal_type} on {timeframe}")
                                 
-                                # Log scan result to Excel
-                                if self.excel_reporter:
-                                    last_row = data_with_indicators.iloc[-1]
-                                    # Determine scanner name based on strategy
-                                    scanner_name = 'BTC-Scalp'
-                                    if signal and getattr(signal, 'strategy', '') == 'H4 HVG':
-                                        scanner_name = 'BTC-Scalp-H4HVG'
-                                    
-                                    scan_data = {
-                                        'timestamp': datetime.now(),
-                                        'scanner': scanner_name,
-                                        'symbol': self.config.exchange.symbol,
-                                        'timeframe': timeframe,
-                                        'price': last_row['close'],
-                                        'volume': last_row['volume'],
-                                        'indicators': {
-                                            'ema_9': last_row.get('ema_9', None),
-                                            'ema_21': last_row.get('ema_21', None),
-                                            'ema_50': last_row.get('ema_50', None),
-                                            'ema_100': last_row.get('ema_100', None),
-                                            'ema_200': last_row.get('ema_200', None),
-                                            'rsi': last_row.get('rsi', None),
-                                            'atr': last_row.get('atr', None),
-                                            'volume_ma': last_row.get('volume_ma', None)
-                                        },
-                                        'signal_detected': signal is not None,
-                                        'signal_type': signal.signal_type if signal else None,
-                                        'signal_details': {
-                                            'entry_price': signal.entry_price,
-                                            'stop_loss': signal.stop_loss,
-                                            'take_profit': signal.take_profit,
-                                            'risk_reward': signal.risk_reward,
-                                            'strategy': getattr(signal, 'strategy', 'N/A'),
-                                            'gap_size_percent': getattr(signal, 'gap_info', {}).gap_percent if signal and hasattr(signal, 'gap_info') and signal.gap_info else None,
-                                            'volume_spike_ratio': getattr(signal, 'volume_spike_ratio', None) if signal else None,
-                                            'confluence_factors': len(getattr(signal, 'confluence_factors', [])) if signal and hasattr(signal, 'confluence_factors') and signal.confluence_factors else None
-                                        } if signal else {}
-                                    }
-                                    self.excel_reporter.log_scan_result(scan_data)
+                                # Record signal
+                                self.health_monitor.record_signal(signal.signal_type)
                                 
-                                if signal:
-                                    logger.info(f"🎯 Signal detected: {signal.signal_type} on {timeframe}")
+                                # Send alerts
+                                alert_success = self.alerter.send_signal_alert(signal)
+                                
+                                if alert_success:
+                                    logger.info("Alert sent successfully")
                                     
-                                    # Record signal
-                                    self.health_monitor.record_signal(signal.signal_type)
-                                    
-                                    # Send alerts
-                                    alert_success = self.alerter.send_signal_alert(signal)
-                                    
-                                    if alert_success:
-                                        logger.info("Alert sent successfully")
-                                        
-                                        # Add trade to tracker
-                                        self.trade_tracker.add_trade(signal)
-                                    else:
-                                        logger.error("Failed to send alert")
-                                    
-                                    # Update email success rate
-                                    if hasattr(self.alerter, 'email_alerter') and self.alerter.email_alerter:
-                                        rate = self.alerter.email_alerter.get_success_rate()
-                                        self.health_monitor.set_email_success_rate(rate)
+                                    # Add trade to tracker
+                                    self.trade_tracker.add_trade(signal)
+                                else:
+                                    logger.error("Failed to send alert")
+                                
+                                # Update email success rate
+                                if hasattr(self.alerter, 'email_alerter') and self.alerter.email_alerter:
+                                    rate = self.alerter.email_alerter.get_success_rate()
+                                    self.health_monitor.set_email_success_rate(rate)
                                 
                     
                     # ALWAYS update active trades (independent of signal detection)

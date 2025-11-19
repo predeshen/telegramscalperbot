@@ -1,5 +1,6 @@
 [Unit]
-Description=Gold Scalping Scanner (1m/5m timeframes)
+Description=Gold (XAUUSD) Scalping Scanner (1m/5m timeframes)
+Documentation=file:///home/ubuntu/telegramscalperbot/DEPLOYMENT_GUIDE.md
 After=network-online.target
 Wants=network-online.target
 
@@ -11,20 +12,33 @@ WorkingDirectory=/home/ubuntu/telegramscalperbot
 ExecStart=/usr/bin/python3 /home/ubuntu/telegramscalperbot/xauusd_scanner/main_gold.py
 Restart=always
 RestartSec=10
-StandardOutput=append:/home/ubuntu/telegramscalperbot/logs/gold_scanner.log
-StandardError=append:/home/ubuntu/telegramscalperbot/logs/gold_scanner.log
+StartLimitInterval=300
+StartLimitBurst=5
+
+# Logging
+StandardOutput=append:/home/ubuntu/telegramscalperbot/logs/gold_scalp_scanner.log
+StandardError=append:/home/ubuntu/telegramscalperbot/logs/gold_scalp_scanner.log
 
 # Environment variables
 Environment="PYTHONUNBUFFERED=1"
+Environment="PYTHONDONTWRITEBYTECODE=1"
 EnvironmentFile=/home/ubuntu/telegramscalperbot/.env
 
 # Security hardening
 NoNewPrivileges=true
 PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/home/ubuntu/telegramscalperbot/logs /home/ubuntu/telegramscalperbot/config
 
 # Resource limits
 LimitNOFILE=4096
 MemoryMax=512M
+CPUQuota=50%
+
+# Timeout settings
+TimeoutStartSec=30
+TimeoutStopSec=10
 
 [Install]
 WantedBy=multi-user.target

@@ -1,5 +1,5 @@
 [Unit]
-Description=US30 Scalping Scanner (5m/15m timeframes)
+Description=Multi-Crypto Scanner (Multiple symbols and timeframes)
 Documentation=file:///home/ubuntu/telegramscalperbot/DEPLOYMENT_GUIDE.md
 After=network-online.target
 Wants=network-online.target
@@ -9,15 +9,15 @@ Type=simple
 User=ubuntu
 Group=ubuntu
 WorkingDirectory=/home/ubuntu/telegramscalperbot
-ExecStart=/usr/bin/python3 /home/ubuntu/telegramscalperbot/us30_scanner/main_us30_scalp.py
+ExecStart=/usr/bin/python3 /home/ubuntu/telegramscalperbot/main_multi_symbol.py --config config/multi_crypto_scalp.json
 Restart=always
 RestartSec=10
 StartLimitInterval=300
 StartLimitBurst=5
 
 # Logging
-StandardOutput=append:/home/ubuntu/telegramscalperbot/logs/us30_scalp_scanner.log
-StandardError=append:/home/ubuntu/telegramscalperbot/logs/us30_scalp_scanner.log
+StandardOutput=append:/home/ubuntu/telegramscalperbot/logs/multi_crypto_scanner.log
+StandardError=append:/home/ubuntu/telegramscalperbot/logs/multi_crypto_scanner.log
 
 # Environment variables
 Environment="PYTHONUNBUFFERED=1"
