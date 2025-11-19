@@ -234,10 +234,20 @@ class ConfigLoader:
             strategies = None
             if 'strategies' in config_data:
                 strategies_data = config_data['strategies']
+                
+                # Helper function to extract only valid config fields
+                def extract_config_fields(data, config_class):
+                    """Extract only fields that the config class accepts."""
+                    if not data:
+                        return {}
+                    # Get valid field names from the dataclass
+                    valid_fields = {f.name for f in config_class.__dataclass_fields__.values()}
+                    return {k: v for k, v in data.items() if k in valid_fields}
+                
                 strategies = StrategyConfig(
-                    fibonacci_retracement=FibonacciConfig(**strategies_data.get('fibonacci_retracement', {})) if 'fibonacci_retracement' in strategies_data else None,
-                    h4_hvg=H4HVGConfig(**strategies_data.get('h4_hvg', {})) if 'h4_hvg' in strategies_data else None,
-                    support_resistance=SupportResistanceConfig(**strategies_data.get('support_resistance', {})) if 'support_resistance' in strategies_data else None
+                    fibonacci_retracement=FibonacciConfig(**extract_config_fields(strategies_data.get('fibonacci_retracement', {}), FibonacciConfig)) if 'fibonacci_retracement' in strategies_data else None,
+                    h4_hvg=H4HVGConfig(**extract_config_fields(strategies_data.get('h4_hvg', {}), H4HVGConfig)) if 'h4_hvg' in strategies_data else None,
+                    support_resistance=SupportResistanceConfig(**extract_config_fields(strategies_data.get('support_resistance', {}), SupportResistanceConfig)) if 'support_resistance' in strategies_data else None
                 )
             
             # Quality filter configuration is optional
