@@ -3,8 +3,6 @@
 # Check status of all trading scanners
 # This script displays the status of all 8 scanner services
 
-set -e
-
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -42,8 +40,13 @@ stopped_count=0
 
 # Check each scanner
 for scanner in "${SCANNERS[@]}"; do
-    # Get service status
-    status=$(systemctl is-active "$scanner" 2>/dev/null || echo "inactive")
+    # Get service status (suppress errors)
+    status=$(systemctl is-active "$scanner" 2>&1 || true)
+    
+    # Check if service exists
+    if [[ "$status" == *"Unit"* ]] || [[ "$status" == *"not-found"* ]]; then
+        status="not-installed"
+    fi
     
     if [ "$status" = "active" ]; then
         echo -e "${GREEN}✓${NC} ${scanner}: ${GREEN}RUNNING${NC}"
@@ -57,6 +60,9 @@ for scanner in "${SCANNERS[@]}"; do
             cpu=$(ps -p "$pid" -o %cpu= 2>/dev/null || echo "N/A")
             echo "  └─ PID: $pid | CPU: ${cpu}% | Memory: ${mem}%"
         fi
+    elif [ "$status" = "not-installed" ]; then
+        echo -e "${YELLOW}⚠${NC} ${scanner}: ${YELLOW}NOT INSTALLED${NC}"
+        ((stopped_count++))
     else
         echo -e "${RED}✗${NC} ${scanner}: ${RED}STOPPED${NC}"
         ((stopped_count++))
