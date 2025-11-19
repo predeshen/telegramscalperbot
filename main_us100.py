@@ -194,14 +194,18 @@ def main():
         candle_data[timeframe] = candles
         logger.info(f"Loaded {timeframe} data with indicators")
     
-    # Send startup notification
+    # Main polling loop
+    logger.info(f"Starting main polling loop ({config['polling_interval_seconds']}-second intervals)...")
+    logger.info("Scanner is now running. Press Ctrl+C to stop.")
+    
+    # Send startup notification after data is loaded
     if alerter:
         try:
             df = candle_data[config['timeframes'][0]]
             current_price = df.iloc[-1]['close'] if not df.empty else 0
             
             startup_msg = (
-                f"🚀 <b>US100/NASDAQ Scanner Started</b>\n\n"
+                f"🚀 *US100/NASDAQ Scanner Started*\n\n"
                 f"💰 Current Price: ${current_price:,.2f}\n"
                 f"⏰ Timeframes: {', '.join(config['timeframes'])}\n"
                 f"🎯 Strategies: H4-HVG, Momentum Shift, Trend Alignment, EMA Cloud, Mean Reversion\n"
@@ -209,12 +213,9 @@ def main():
                 f"🔍 Scanning for opportunities..."
             )
             alerter.send_message(startup_msg)
+            logger.info("✓ Startup notification sent")
         except Exception as e:
             logger.warning(f"Failed to send startup message: {e}")
-    
-    # Main polling loop
-    logger.info(f"Starting main polling loop ({config['polling_interval_seconds']}-second intervals)...")
-    logger.info("Scanner is now running. Press Ctrl+C to stop.")
     
     last_heartbeat = time.time()
     heartbeat_interval = 5400  # 90 minutes
@@ -343,7 +344,7 @@ def main():
                         report = diagnostics.generate_report()
                         
                         heartbeat_msg = (
-                            f"💙 <b>US100 Scanner Heartbeat</b>\n\n"
+                            f"💙 *US100 Scanner Heartbeat*\n\n"
                             f"⏰ Time: {datetime.now().strftime('%H:%M:%S UTC')}\n"
                             f"💰 Price: ${last_candle['close']:,.2f}\n"
                             f"📊 RSI: {last_candle.get('rsi', 0):.1f}\n"
