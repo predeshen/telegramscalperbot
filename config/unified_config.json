@@ -1,0 +1,630 @@
+{
+  "application": {
+    "name": "Trading Scanner System",
+    "version": "2.0.0",
+    "environment": "production",
+    "description": "Unified trading scanner for crypto, forex, and indices"
+  },
+
+  "data_providers": {
+    "primary": "binance",
+    "fallback_sources": ["twelve_data", "alpha_vantage", "mt5"],
+    "freshness_threshold_seconds": 300,
+    "retry_config": {
+      "max_attempts": 3,
+      "backoff_multiplier": 2,
+      "initial_delay_seconds": 1
+    },
+    "credentials": {
+      "alpha_vantage_key": "66IUJDWBSTV9U220",
+      "twelve_data_key": "a4f7101c037f4cf5949a1be62973283f",
+      "binance_api_key": "",
+      "binance_api_secret": "",
+      "mt5_account": "",
+      "mt5_password": ""
+    }
+  },
+
+  "communication": {
+    "smtp": {
+      "enabled": true,
+      "server": "mail.hashub.co.za",
+      "port": 465,
+      "user": "alerts@hashub.co.za",
+      "password": "Password@2025#!",
+      "from_email": "alerts@hashub.co.za",
+      "to_email": "predeshen@gmail.com",
+      "use_ssl": true,
+      "retry_attempts": 3,
+      "retry_delay_seconds": 5
+    },
+    "telegram": {
+      "enabled": true,
+      "bot_token": "8276571945:AAFKYdUCEd7Ct405K8BcBWWHyxZe5wGwo7M",
+      "chat_id": "8119046376",
+      "retry_attempts": 3,
+      "retry_delay_seconds": 2
+    },
+    "excel_reporting": {
+      "enabled": true,
+      "report_interval_seconds": 3600,
+      "initial_report_delay_seconds": 300,
+      "retention_days": 30
+    }
+  },
+
+  "indicators": {
+    "ema_fast": 9,
+    "ema_slow": 21,
+    "ema_trend": 50,
+    "atr_period": 14,
+    "rsi_period": 6,
+    "volume_ma_period": 20,
+    "adx_period": 14
+  },
+
+  "signal_rules": {
+    "volume_spike_threshold": 1.3,
+    "volume_momentum_shift": 1.3,
+    "volume_trend_alignment": 0.8,
+    "volume_ema_cloud_breakout": 1.3,
+    "volume_mean_reversion": 1.5,
+    "rsi_min": 25,
+    "rsi_max": 75,
+    "rsi_momentum_threshold": 55,
+    "stop_loss_atr_multiplier": 1.2,
+    "take_profit_atr_multiplier": 2.0,
+    "momentum_shift_sl_multiplier": 1.2,
+    "momentum_shift_tp_multiplier": 2.0,
+    "adx_min_momentum_shift": 15,
+    "adx_min_trend_alignment": 15,
+    "adx_min_trend": 15,
+    "duplicate_time_window_minutes": 10,
+    "duplicate_price_threshold_percent": 1.0,
+    "enable_extreme_rsi_signals": true
+  },
+
+  "quality_filter": {
+    "min_confluence_factors": 3,
+    "min_confidence_score": 3,
+    "min_risk_reward": 1.2,
+    "duplicate_window_seconds": 600,
+    "duplicate_price_tolerance_pct": 1.0,
+    "significant_price_move_pct": 1.5
+  },
+
+  "asset_specific": {
+    "BTC": {
+      "enabled": true,
+      "display_name": "Bitcoin",
+      "emoji": "₿",
+      "asset_type": "crypto",
+      "min_confluence_factors": 3,
+      "min_confidence_score": 3,
+      "adx_threshold": 15,
+      "volume_thresholds": {
+        "scalp": 1.3,
+        "swing": 1.2,
+        "trend_alignment": 0.8,
+        "breakout": 1.3,
+        "mean_reversion": 1.5,
+        "momentum_shift": 1.3
+      },
+      "rsi_range": {
+        "min": 25,
+        "max": 75
+      },
+      "adx_minimum": 15,
+      "rsi_momentum_threshold": 55,
+      "trading_hours": null,
+      "duplicate_window_minutes": {
+        "scalp": 10,
+        "swing": 60
+      },
+      "exit_rules": {
+        "grace_period_minutes": 5,
+        "min_profit_threshold_percent": 1.0,
+        "max_giveback_percent": 40,
+        "min_peak_profit_for_exit": 2.0
+      }
+    },
+    "ETH": {
+      "enabled": true,
+      "display_name": "Ethereum",
+      "emoji": "Ξ",
+      "asset_type": "crypto",
+      "min_confluence_factors": 3,
+      "min_confidence_score": 3,
+      "adx_threshold": 15,
+      "volume_thresholds": {
+        "scalp": 1.3,
+        "swing": 1.2,
+        "trend_alignment": 0.8,
+        "breakout": 1.3,
+        "mean_reversion": 1.5,
+        "momentum_shift": 1.3
+      },
+      "rsi_range": {
+        "min": 25,
+        "max": 75
+      },
+      "adx_minimum": 15,
+      "rsi_momentum_threshold": 55,
+      "trading_hours": null,
+      "duplicate_window_minutes": {
+        "scalp": 10,
+        "swing": 60
+      },
+      "exit_rules": {
+        "grace_period_minutes": 5,
+        "min_profit_threshold_percent": 1.2,
+        "max_giveback_percent": 40,
+        "min_peak_profit_for_exit": 2.0
+      }
+    },
+    "SOL": {
+      "enabled": true,
+      "display_name": "Solana",
+      "emoji": "◎",
+      "asset_type": "crypto",
+      "min_confluence_factors": 3,
+      "min_confidence_score": 3,
+      "adx_threshold": 15,
+      "volume_thresholds": {
+        "scalp": 1.3,
+        "swing": 1.2,
+        "trend_alignment": 0.8,
+        "breakout": 1.3,
+        "mean_reversion": 1.5,
+        "momentum_shift": 1.3
+      },
+      "rsi_range": {
+        "min": 25,
+        "max": 75
+      },
+      "adx_minimum": 15,
+      "rsi_momentum_threshold": 55,
+      "trading_hours": null,
+      "duplicate_window_minutes": {
+        "scalp": 10,
+        "swing": 60
+      },
+      "exit_rules": {
+        "grace_period_minutes": 5,
+        "min_profit_threshold_percent": 1.5,
+        "max_giveback_percent": 40,
+        "min_peak_profit_for_exit": 2.5
+      }
+    },
+    "XAUUSD": {
+      "enabled": true,
+      "display_name": "Gold",
+      "emoji": "🥇",
+      "asset_type": "commodity",
+      "min_confluence_factors": 3,
+      "min_confidence_score": 3,
+      "adx_threshold": 15,
+      "volume_thresholds": {
+        "scalp": 1.4,
+        "swing": 1.3,
+        "trend_alignment": 0.9,
+        "breakout": 1.4,
+        "mean_reversion": 1.6,
+        "momentum_shift": 1.4
+      },
+      "rsi_range": {
+        "min": 25,
+        "max": 75
+      },
+      "adx_minimum": 15,
+      "rsi_momentum_threshold": 55,
+      "trading_hours": ["London", "NewYork"],
+      "duplicate_window_minutes": {
+        "scalp": 10,
+        "swing": 60
+      },
+      "exit_rules": {
+        "grace_period_minutes": 5,
+        "min_profit_threshold_percent": 0.5,
+        "max_giveback_percent": 40,
+        "min_peak_profit_for_exit": 1.0
+      }
+    },
+    "US30": {
+      "enabled": true,
+      "display_name": "Dow Jones 30",
+      "emoji": "📈",
+      "asset_type": "index",
+      "min_confluence_factors": 3,
+      "min_confidence_score": 3,
+      "adx_threshold": 20,
+      "volume_thresholds": {
+        "momentum": 1.5,
+        "trend_alignment": 1.0,
+        "breakout": 1.5,
+        "mean_reversion": 1.6,
+        "momentum_shift": 1.5
+      },
+      "rsi_range": {
+        "min": 30,
+        "max": 70
+      },
+      "adx_minimum": 20,
+      "rsi_momentum_threshold": 55,
+      "trading_hours": ["NewYork"],
+      "duplicate_window_minutes": {
+        "scalp": 10,
+        "swing": 60
+      },
+      "exit_rules": {
+        "grace_period_minutes": 5,
+        "min_profit_threshold_percent": 0.3,
+        "max_giveback_percent": 35,
+        "min_peak_profit_for_exit": 0.5
+      }
+    },
+    "US100": {
+      "enabled": true,
+      "display_name": "Nasdaq 100",
+      "emoji": "💻",
+      "asset_type": "index",
+      "min_confluence_factors": 3,
+      "min_confidence_score": 3,
+      "adx_threshold": 18,
+      "volume_thresholds": {
+        "scalp": 1.3,
+        "swing": 1.2,
+        "momentum": 1.4,
+        "trend_alignment": 0.9,
+        "breakout": 1.4,
+        "mean_reversion": 1.5,
+        "momentum_shift": 1.4
+      },
+      "rsi_range": {
+        "min": 25,
+        "max": 75
+      },
+      "adx_minimum": 18,
+      "rsi_momentum_threshold": 55,
+      "trading_hours": ["NewYork"],
+      "duplicate_window_minutes": {
+        "scalp": 10,
+        "swing": 60
+      },
+      "exit_rules": {
+        "grace_period_minutes": 5,
+        "min_profit_threshold_percent": 0.3,
+        "max_giveback_percent": 35,
+        "min_peak_profit_for_exit": 0.5
+      }
+    },
+    "EURUSD": {
+      "enabled": true,
+      "display_name": "EUR/USD",
+      "emoji": "💱",
+      "asset_type": "forex",
+      "min_confluence_factors": 3,
+      "min_confidence_score": 3,
+      "adx_threshold": 15,
+      "volume_thresholds": {
+        "scalp": 1.4,
+        "swing": 1.3,
+        "trend_alignment": 0.9,
+        "breakout": 1.4,
+        "mean_reversion": 1.6,
+        "momentum_shift": 1.4
+      },
+      "rsi_range": {
+        "min": 25,
+        "max": 75
+      },
+      "adx_minimum": 15,
+      "rsi_momentum_threshold": 55,
+      "trading_hours": ["London", "NewYork"],
+      "duplicate_window_minutes": {
+        "scalp": 10,
+        "swing": 60
+      },
+      "exit_rules": {
+        "grace_period_minutes": 5,
+        "min_profit_threshold_percent": 0.3,
+        "max_giveback_percent": 35,
+        "min_peak_profit_for_exit": 0.5
+      }
+    },
+    "GBPUSD": {
+      "enabled": true,
+      "display_name": "GBP/USD",
+      "emoji": "💷",
+      "asset_type": "forex",
+      "min_confluence_factors": 3,
+      "min_confidence_score": 3,
+      "adx_threshold": 15,
+      "volume_thresholds": {
+        "scalp": 1.4,
+        "swing": 1.3,
+        "trend_alignment": 0.9,
+        "breakout": 1.4,
+        "mean_reversion": 1.6,
+        "momentum_shift": 1.4
+      },
+      "rsi_range": {
+        "min": 25,
+        "max": 75
+      },
+      "adx_minimum": 15,
+      "rsi_momentum_threshold": 55,
+      "trading_hours": ["London", "NewYork"],
+      "duplicate_window_minutes": {
+        "scalp": 10,
+        "swing": 60
+      },
+      "exit_rules": {
+        "grace_period_minutes": 5,
+        "min_profit_threshold_percent": 0.4,
+        "max_giveback_percent": 35,
+        "min_peak_profit_for_exit": 0.6
+      }
+    },
+    "USDJPY": {
+      "enabled": false,
+      "display_name": "USD/JPY",
+      "emoji": "💴",
+      "asset_type": "forex",
+      "min_confluence_factors": 3,
+      "min_confidence_score": 3,
+      "adx_threshold": 15,
+      "volume_thresholds": {
+        "scalp": 1.4,
+        "swing": 1.3,
+        "trend_alignment": 0.9,
+        "breakout": 1.4,
+        "mean_reversion": 1.6,
+        "momentum_shift": 1.4
+      },
+      "rsi_range": {
+        "min": 25,
+        "max": 75
+      },
+      "adx_minimum": 15,
+      "rsi_momentum_threshold": 55,
+      "trading_hours": ["Asian", "London"],
+      "duplicate_window_minutes": {
+        "scalp": 10,
+        "swing": 60
+      },
+      "exit_rules": {
+        "grace_period_minutes": 5,
+        "min_profit_threshold_percent": 0.3,
+        "max_giveback_percent": 35,
+        "min_peak_profit_for_exit": 0.5
+      }
+    }
+  },
+
+  "strategies": {
+    "fibonacci_retracement": {
+      "enabled": true,
+      "scanners": ["btc_scalp", "btc_swing", "gold_scalp", "gold_swing"],
+      "params": {
+        "swing_lookback": 50,
+        "level_tolerance_percent": 0.5,
+        "volume_threshold": 1.3,
+        "require_reversal_candle": true
+      }
+    },
+    "support_resistance_bounce": {
+      "enabled": true,
+      "scanners": ["btc_scalp", "btc_swing", "gold_scalp", "gold_swing"],
+      "params": {
+        "lookback_candles": 100,
+        "min_touches": 2,
+        "level_tolerance_percent": 0.3,
+        "volume_threshold": 1.4,
+        "require_reversal_candle": true
+      }
+    },
+    "key_level_break_retest": {
+      "enabled": true,
+      "scanners": ["btc_scalp", "btc_swing", "us30_scalp", "us30_swing"],
+      "params": {
+        "retest_window_candles": [5, 10],
+        "volume_threshold_break": 1.5,
+        "volume_threshold_retest": 0.8,
+        "major_level_volume_multiplier": 1.5
+      }
+    },
+    "adx_rsi_momentum": {
+      "enabled": true,
+      "scanners": ["btc_scalp", "btc_swing", "us30_scalp", "us30_swing"],
+      "params": {
+        "adx_min": 20,
+        "adx_strong": 25,
+        "rsi_momentum_threshold": 3.0,
+        "volume_threshold": 1.2,
+        "require_adx_rising": false
+      }
+    },
+    "h4_hvg": {
+      "enabled": true,
+      "scanners": ["btc_swing", "gold_swing", "us100"],
+      "params": {
+        "min_gap_percent": 0.15,
+        "volume_spike_threshold": 1.5,
+        "atr_multiplier_sl": 1.5,
+        "gap_target_multiplier": 2.0,
+        "min_risk_reward": 1.5,
+        "max_gap_age_candles": 3,
+        "rsi_min": 30,
+        "rsi_max": 70,
+        "require_ema_confluence": true,
+        "duplicate_time_window_minutes": 240,
+        "duplicate_price_threshold_percent": 0.5
+      }
+    },
+    "fvg_detection": {
+      "enabled": true,
+      "scanners": ["btc_swing", "gold_swing"],
+      "params": {
+        "min_gap_percent": 0.15,
+        "volume_spike_threshold": 1.5,
+        "lookback_candles": 20,
+        "reentry_tolerance_percent": 0.5
+      }
+    },
+    "nwog_detection": {
+      "enabled": true,
+      "scanners": ["btc_swing", "gold_swing"],
+      "params": {
+        "min_gap_percent": 0.1,
+        "lookback_weeks": 2,
+        "respect_tolerance_percent": 0.3
+      }
+    }
+  },
+
+  "strategy_priority": {
+    "high_volatility": ["adx_rsi_momentum", "momentum_shift", "ema_cloud_breakout"],
+    "low_volatility": ["mean_reversion", "support_resistance_bounce", "fibonacci_retracement"],
+    "strong_trend": ["adx_rsi_momentum", "trend_alignment", "key_level_break_retest"],
+    "ranging": ["support_resistance_bounce", "mean_reversion"]
+  },
+
+  "scanners": {
+    "btc_scalp": {
+      "enabled": true,
+      "symbol": "BTC/USD",
+      "timeframes": ["1m", "5m", "15m"],
+      "polling_interval_seconds": 30,
+      "scanner_type": "scalp",
+      "strategies": ["fibonacci_retracement", "support_resistance_bounce", "adx_rsi_momentum"]
+    },
+    "btc_swing": {
+      "enabled": true,
+      "symbol": "BTC/USD",
+      "timeframes": ["15m", "1h", "4h", "1d"],
+      "polling_interval_seconds": 60,
+      "scanner_type": "swing",
+      "strategies": ["h4_hvg", "fvg_detection", "key_level_break_retest"]
+    },
+    "gold_scalp": {
+      "enabled": true,
+      "symbol": "XAU/USD",
+      "timeframes": ["1m", "5m", "15m"],
+      "polling_interval_seconds": 30,
+      "scanner_type": "scalp",
+      "strategies": ["fibonacci_retracement", "support_resistance_bounce", "adx_rsi_momentum"]
+    },
+    "gold_swing": {
+      "enabled": true,
+      "symbol": "XAU/USD",
+      "timeframes": ["15m", "1h", "4h", "1d"],
+      "polling_interval_seconds": 60,
+      "scanner_type": "swing",
+      "strategies": ["h4_hvg", "fvg_detection", "key_level_break_retest"]
+    },
+    "us30_scalp": {
+      "enabled": true,
+      "symbol": "^DJI",
+      "timeframes": ["1m", "5m", "15m"],
+      "polling_interval_seconds": 30,
+      "scanner_type": "scalp",
+      "strategies": ["adx_rsi_momentum", "key_level_break_retest"]
+    },
+    "us30_swing": {
+      "enabled": true,
+      "symbol": "^DJI",
+      "timeframes": ["15m", "1h", "4h"],
+      "polling_interval_seconds": 60,
+      "scanner_type": "swing",
+      "strategies": ["h4_hvg", "key_level_break_retest"]
+    },
+    "us100": {
+      "enabled": true,
+      "symbol": "^NDX",
+      "timeframes": ["1m", "5m", "15m", "4h"],
+      "polling_interval_seconds": 30,
+      "scanner_type": "mixed",
+      "strategies": ["adx_rsi_momentum", "h4_hvg", "key_level_break_retest"]
+    },
+    "multi_crypto_scalp": {
+      "enabled": true,
+      "symbols": ["BTC-USD", "ETH-USD", "SOL-USD"],
+      "timeframes": ["1m", "5m", "15m"],
+      "polling_interval_seconds": 60,
+      "scanner_type": "crypto_scalp",
+      "strategies": ["fibonacci_retracement", "support_resistance_bounce", "adx_rsi_momentum"]
+    },
+    "multi_crypto_swing": {
+      "enabled": true,
+      "symbols": ["BTC-USD", "ETH-USD"],
+      "timeframes": ["15m", "1h", "4h", "1d"],
+      "polling_interval_seconds": 60,
+      "scanner_type": "crypto_swing",
+      "strategies": ["h4_hvg", "fvg_detection", "key_level_break_retest"]
+    },
+    "multi_fx_scalp": {
+      "enabled": true,
+      "symbols": ["EURUSD=X", "GBPUSD=X"],
+      "timeframes": ["5m", "15m", "1h"],
+      "polling_interval_seconds": 60,
+      "scanner_type": "fx_scalp",
+      "strategies": ["fibonacci_retracement", "support_resistance_bounce", "adx_rsi_momentum"]
+    },
+    "multi_mixed": {
+      "enabled": true,
+      "symbols": ["BTC-USD", "ETH-USD", "EURUSD=X"],
+      "timeframes": ["15m", "1h", "4h"],
+      "polling_interval_seconds": 60,
+      "scanner_type": "mixed",
+      "strategies": ["h4_hvg", "key_level_break_retest", "fvg_detection"]
+    }
+  },
+
+  "diagnostics": {
+    "enabled": true,
+    "log_detection_attempts": true,
+    "log_filter_rejections": true,
+    "daily_summary_time": "18:00",
+    "alert_on_no_signals_hours": 4
+  },
+
+  "bypass_mode": {
+    "enabled": false,
+    "auto_disable_after_hours": 2
+  },
+
+  "logging": {
+    "level": "INFO",
+    "file": "logs/scanner.log",
+    "rotation": "daily",
+    "retention_days": 7,
+    "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  },
+
+  "performance": {
+    "max_concurrent_symbols": 10,
+    "signal_conflict_window_minutes": 5,
+    "duplicate_signal_window_minutes": 10,
+    "cache_ttl_seconds": 300,
+    "thread_pool_size": 4
+  },
+
+  "trading_sessions": {
+    "Asian": {
+      "start_hour": 0,
+      "end_hour": 9,
+      "timezone": "UTC"
+    },
+    "London": {
+      "start_hour": 8,
+      "end_hour": 17,
+      "timezone": "UTC"
+    },
+    "NewYork": {
+      "start_hour": 13,
+      "end_hour": 22,
+      "timezone": "UTC"
+    }
+  }
+}
