@@ -95,13 +95,22 @@ class ConfigValidator:
         Validate a configuration section
         
         Args:
-            section: Configuration section dictionary
+            section: Configuration section dictionary or dataclass
             section_name: Name of the section for logging
             
         Returns:
             List of warning messages
         """
         warnings = []
+        
+        # Convert dataclass to dict if needed
+        if hasattr(section, '__dataclass_fields__'):
+            from dataclasses import asdict
+            section = asdict(section)
+        
+        # Handle non-dict objects
+        if not isinstance(section, dict):
+            return warnings
         
         for param, value in section.items():
             # Skip non-numeric values
