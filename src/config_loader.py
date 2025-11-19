@@ -116,6 +116,47 @@ class H4HVGConfig:
 
 
 @dataclass
+class FibonacciConfig:
+    """Fibonacci retracement strategy configuration."""
+    enabled: bool = True
+    swing_lookback: int = 50
+    level_tolerance_percent: float = 0.5
+    volume_threshold: float = 1.3
+    require_reversal_candle: bool = True
+
+
+@dataclass
+class SupportResistanceConfig:
+    """Support/Resistance strategy configuration."""
+    enabled: bool = True
+    lookback_candles: int = 100
+    min_touches: int = 2
+    level_tolerance_percent: float = 0.3
+    volume_threshold: float = 1.4
+    require_reversal_candle: bool = True
+
+
+@dataclass
+class AssetSpecificConfig:
+    """Asset-specific configuration overrides."""
+    min_confluence_factors: int = 4
+    min_confidence_score: int = 3
+    volume_thresholds: Optional[dict] = None
+    rsi_range: Optional[dict] = None
+    adx_minimum: int = 15
+    trading_hours: Optional[List[str]] = None
+    duplicate_window_minutes: Optional[dict] = None
+
+
+@dataclass
+class StrategyConfig:
+    """Strategy configuration."""
+    fibonacci_retracement: Optional[FibonacciConfig] = None
+    h4_hvg: Optional[H4HVGConfig] = None
+    support_resistance: Optional[SupportResistanceConfig] = None
+
+
+@dataclass
 class Config:
     """Main application configuration."""
     exchange: ExchangeConfig
@@ -126,6 +167,9 @@ class Config:
     logging: LoggingConfig
     data_providers: Optional[DataProvidersConfig] = None
     h4_hvg: Optional[H4HVGConfig] = None
+    asset_specific: Optional[dict] = None  # Dict[symbol, AssetSpecificConfig]
+    strategies: Optional[StrategyConfig] = None
+    quality_filter: Optional[dict] = None
 
 
 class ConfigLoader:
@@ -183,6 +227,22 @@ class ConfigLoader:
             if 'h4_hvg' in config_data:
                 h4_hvg = H4HVGConfig(**config_data['h4_hvg'])
             
+            # Asset-specific configuration is optional
+            asset_specific = config_data.get('asset_specific', {})
+            
+            # Strategies configuration is optional
+            strategies = None
+            if 'strategies' in config_data:
+                strategies_data = config_data['strategies']
+                strategies = StrategyConfig(
+                    fibonacci_retracement=FibonacciConfig(**strategies_data.get('fibonacci_retracement', {})) if 'fibonacci_retracement' in strategies_data else None,
+                    h4_hvg=H4HVGConfig(**strategies_data.get('h4_hvg', {})) if 'h4_hvg' in strategies_data else None,
+                    support_resistance=SupportResistanceConfig(**strategies_data.get('support_resistance', {})) if 'support_resistance' in strategies_data else None
+                )
+            
+            # Quality filter configuration is optional
+            quality_filter = config_data.get('quality_filter', {})
+            
             config = Config(
                 exchange=exchange,
                 indicators=indicators,
@@ -191,7 +251,10 @@ class ConfigLoader:
                 telegram=telegram,
                 logging=logging,
                 data_providers=data_providers,
-                h4_hvg=h4_hvg
+                h4_hvg=h4_hvg,
+                asset_specific=asset_specific,
+                strategies=strategies,
+                quality_filter=quality_filter
             )
             
             # Validate configuration
@@ -301,3 +364,84 @@ class ConfigLoader:
         
         if config.logging.retention_days < 1:
             raise ValueError("Log retention days must be positive")
+    
+    @staticmethod
+    def get_asset_config(config: Config, symbol: str) -> dict:
+        """
+        Get asset-specific configuration for a symbol.
+        
+        Args:
+            config: Main configuration object
+            symbol: Asset symbol (BTC, XAUUSD, US30, US100)
+            
+        Returns:
+            Dictionary with asset-specific configuration
+        """
+        if not config.asset_specific:
+            return {}
+        
+        return config.asset_specific.get(symbol, {})
+    
+    @staticmethod
+    def get_strategy_config(config: Config, strategy_name: str) -> dict:
+        """
+        Get strategy-specific configuration.
+        
+        Args:
+            config: Main configuration object
+            strategy_name: Strategy name (fibonacci_retracement, h4_hvg, support_resistance)
+            
+        Returns:
+            Dictionary with strategy configuration
+        """
+        if not config.strategies:
+            return {}
+        
+        if strategy_name == 'fibonacci_retracement' and config.strategies.fibonacci_retracement:
+            return config.strategies.fibonacci_retracement.__dict__
+        elif strategy_name == 'h4_hvg' and config.strategies.h4_hvg:
+            return config.strategies.h4_hvg.__dict__
+        elif strategy_name == 'support_resistance' and config.strategies.support_resistance:
+            return config.strategies.support_resistance.__dict__
+        
+        return {}
+    
+    @staticmethod
+    def validate_config(config_dict: dict) -> List[str]:
+        """
+        Validate configuration and return list of warnings.
+        
+        Args:
+            config_dict: Configuration dictionary
+            
+        Returns:
+            List of warning messages
+        """
+        warnings = []
+        
+        # Check for required keys
+        required_keys = ['exchange', 'indicators', 'signal_rules', 'smtp', 'logging']
+        for key in required_keys:
+            if key not in config_dict:
+                warnings.append(f"Missing recommended configuration key: {key}")
+        
+        # Check for data provider keys
+        if 'data_providers' in config_dict:
+            data_providers = config_dict['data_providers']
+            if not data_providers.get('alpha_vantage_key'):
+                warnings.append("Alpha Vantage API key not configured")
+            if not data_providers.get('twelve_data_key'):
+                warnings.append("Twelve Data API key not configured")
+        
+        # Check for alerting configuration
+        if config_dict.get('smtp', {}).get('password') == 'DISABLED':
+            warnings.append("Email alerts disabled (SMTP password is DISABLED)")
+        
+        if not config_dict.get('telegram', {}).get('enabled'):
+            warnings.append("Telegram alerts disabled")
+        
+        # Check for strategy configuration
+        if 'strategies' not in config_dict:
+            warnings.append("No strategies configured")
+        
+        return warnings

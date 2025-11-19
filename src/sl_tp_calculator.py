@@ -233,3 +233,232 @@ class SLTPCalculator:
             take_profit = entry_price - (risk * 2.5)
         
         return take_profit
+
+    @staticmethod
+    def calculate_historical_sltp(
+        data: pd.DataFrame,
+        entry_price: float,
+        signal_type: str,  # "LONG" or "SHORT"
+        atr: float,
+        lookback: int = 100,
+        min_rr: float = 1.2
+    ) -> Tuple[float, float, float]:
+        """
+        Calculate SL/TP based on historical price action analysis.
+        
+        Analyzes previous candles to find the most common reversal distances
+        and uses these as the basis for SL/TP placement.
+        
+        Args:
+            data: DataFrame with OHLCV data (minimum 100 candles)
+            entry_price: Entry price
+            signal_type: "LONG" or "SHORT"
+            atr: Current ATR value
+            lookback: Number of candles to analyze (minimum 100)
+            min_rr: Minimum acceptable risk/reward ratio
+            
+        Returns:
+            Tuple of (stop_loss, take_profit, risk_reward)
+        """
+        if len(data) < lookback:
+            logger.warning(f"Insufficient data for historical analysis ({len(data)} < {lookback}), falling back to ATR")
+            return SLTPCalculator._calculate_atr_based_sltp(entry_price, signal_type, atr, min_rr)
+        
+        try:
+            # Analyze historical reversals
+            reversal_distances = SLTPCalculator._analyze_historical_reversals(data, signal_type)
+            
+            if not reversal_distances:
+                logger.warning("No historical reversals found, falling back to ATR")
+                return SLTPCalculator._calculate_atr_based_sltp(entry_price, signal_type, atr, min_rr)
+            
+            # Calculate mode (most common distance)
+            mode_distance = SLTPCalculator._calculate_mode_distance(reversal_distances)
+            
+            if signal_type == "LONG":
+                # For LONG: SL below entry, TP above entry
+                stop_loss = entry_price - mode_distance
+                
+                # Calculate TP to achieve minimum R:R
+                risk = abs(entry_price - stop_loss)
+                take_profit = entry_price + (risk * min_rr)
+                
+            else:  # SHORT
+                # For SHORT: SL above entry, TP below entry
+                stop_loss = entry_price + mode_distance
+                
+                # Calculate TP to achieve minimum R:R
+                risk = abs(stop_loss - entry_price)
+                take_profit = entry_price - (risk * min_rr)
+            
+            # Calculate risk/reward
+            risk = abs(entry_price - stop_loss)
+            reward = abs(take_profit - entry_price)
+            risk_reward = reward / risk if risk > 0 else 0
+            
+            logger.info(f"Historical SL/TP: Mode distance={mode_distance:.2f}, SL={stop_loss:.2f}, TP={take_profit:.2f}, R:R={risk_reward:.2f}")
+            
+            return stop_loss, take_profit, risk_reward
+            
+        except Exception as e:
+            logger.error(f"Error in historical SL/TP calculation: {e}, falling back to ATR")
+            return SLTPCalculator._calculate_atr_based_sltp(entry_price, signal_type, atr, min_rr)
+    
+    @staticmethod
+    def _analyze_historical_reversals(
+        data: pd.DataFrame,
+        signal_type: str
+    ) -> List[float]:
+        """
+        Analyze historical price reversals to find common distances.
+        
+        Args:
+            data: DataFrame with OHLCV data
+            signal_type: "LONG" or "SHORT"
+            
+        Returns:
+            List of reversal distances
+        """
+        try:
+            reversals = []
+            
+            if signal_type == "LONG":
+                # For LONG signals, find distances from local lows to subsequent highs
+                for i in range(2, len(data) - 2):
+                    # Check if this is a local low
+                    if data.iloc[i]['low'] < data.iloc[i-1]['low'] and \
+                       data.iloc[i]['low'] < data.iloc[i+1]['low']:
+                        
+                        # Find the next local high
+                        for j in range(i+1, min(i+20, len(data)-1)):
+                            if data.iloc[j]['high'] > data.iloc[j-1]['high'] and \
+                               data.iloc[j]['high'] > data.iloc[j+1]['high']:
+                                
+                                # Calculate distance
+                                distance = data.iloc[j]['high'] - data.iloc[i]['low']
+                                reversals.append(distance)
+                                break
+            
+            else:  # SHORT
+                # For SHORT signals, find distances from local highs to subsequent lows
+                for i in range(2, len(data) - 2):
+                    # Check if this is a local high
+                    if data.iloc[i]['high'] > data.iloc[i-1]['high'] and \
+                       data.iloc[i]['high'] > data.iloc[i+1]['high']:
+                        
+                        # Find the next local low
+                        for j in range(i+1, min(i+20, len(data)-1)):
+                            if data.iloc[j]['low'] < data.iloc[j-1]['low'] and \
+                               data.iloc[j]['low'] < data.iloc[j+1]['low']:
+                                
+                                # Calculate distance
+                                distance = data.iloc[i]['high'] - data.iloc[j]['low']
+                                reversals.append(distance)
+                                break
+            
+            logger.debug(f"Found {len(reversals)} historical reversals for {signal_type}")
+            return reversals
+            
+        except Exception as e:
+            logger.error(f"Error analyzing historical reversals: {e}")
+            return []
+    
+    @staticmethod
+    def _calculate_mode_distance(distances: List[float]) -> float:
+        """
+        Calculate mode (most common distance) from list of distances.
+        
+        Uses histogram binning to find the most common distance range.
+        
+        Args:
+            distances: List of distance values
+            
+        Returns:
+            Mode distance value
+        """
+        try:
+            if not distances:
+                return 0.0
+            
+            # Create histogram with 20 bins
+            counts, bins = np.histogram(distances, bins=20)
+            
+            # Find bin with most occurrences
+            max_count_idx = np.argmax(counts)
+            
+            # Return midpoint of the bin with most occurrences
+            mode_distance = (bins[max_count_idx] + bins[max_count_idx + 1]) / 2
+            
+            logger.debug(f"Mode distance: {mode_distance:.2f} (from {len(distances)} samples)")
+            
+            return mode_distance
+            
+        except Exception as e:
+            logger.error(f"Error calculating mode distance: {e}")
+            # Fallback to median
+            return float(np.median(distances)) if distances else 0.0
+    
+    @staticmethod
+    def _calculate_atr_based_sltp(
+        entry_price: float,
+        signal_type: str,
+        atr: float,
+        min_rr: float = 1.2
+    ) -> Tuple[float, float, float]:
+        """
+        Calculate SL/TP using ATR-based method (fallback).
+        
+        Args:
+            entry_price: Entry price
+            signal_type: "LONG" or "SHORT"
+            atr: Current ATR value
+            min_rr: Minimum risk/reward ratio
+            
+        Returns:
+            Tuple of (stop_loss, take_profit, risk_reward)
+        """
+        if signal_type == "LONG":
+            stop_loss = entry_price - (atr * 1.2)
+            take_profit = entry_price + (atr * 2.0)
+        else:  # SHORT
+            stop_loss = entry_price + (atr * 1.2)
+            take_profit = entry_price - (atr * 2.0)
+        
+        risk = abs(entry_price - stop_loss)
+        reward = abs(take_profit - entry_price)
+        risk_reward = reward / risk if risk > 0 else 0
+        
+        return stop_loss, take_profit, risk_reward
+    
+    @staticmethod
+    def validate_risk_reward(
+        entry: float,
+        sl: float,
+        tp: float,
+        min_ratio: float = 1.2
+    ) -> bool:
+        """
+        Validate that risk/reward ratio meets minimum threshold.
+        
+        Args:
+            entry: Entry price
+            sl: Stop loss price
+            tp: Take profit price
+            min_ratio: Minimum acceptable ratio
+            
+        Returns:
+            True if ratio meets minimum, False otherwise
+        """
+        try:
+            risk = abs(entry - sl)
+            reward = abs(tp - entry)
+            
+            if risk == 0:
+                return False
+            
+            ratio = reward / risk
+            return ratio >= min_ratio
+            
+        except Exception as e:
+            logger.error(f"Error validating risk/reward: {e}")
+            return False

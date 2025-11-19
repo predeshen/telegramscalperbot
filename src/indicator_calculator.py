@@ -594,3 +594,182 @@ class IndicatorCalculator:
         except Exception as e:
             logger.error(f"Error in calculate_all_indicators: {e}", exc_info=True)
             raise
+    
+    @staticmethod
+    def calculate_fibonacci_levels(
+        data: pd.DataFrame,
+        lookback: int = 50
+    ) -> dict:
+        """
+        Calculate Fibonacci retracement levels from swing highs and lows.
+        
+        Args:
+            data: DataFrame with OHLC data
+            lookback: Number of candles to analyze for swing points
+            
+        Returns:
+            Dictionary with Fibonacci levels and swing points
+        """
+        try:
+            if len(data) < lookback:
+                logger.warning(f"Insufficient data for Fibonacci ({len(data)} < {lookback})")
+                return {}
+            
+            # Get recent data
+            recent = data.tail(lookback)
+            
+            # Find swing high and low
+            swing_high = recent['high'].max()
+            swing_low = recent['low'].min()
+            
+            if swing_high == swing_low:
+                logger.warning("Swing high equals swing low, cannot calculate Fibonacci levels")
+                return {}
+            
+            # Calculate Fibonacci levels
+            diff = swing_high - swing_low
+            
+            levels = {
+                'swing_high': swing_high,
+                'swing_low': swing_low,
+                'level_0': swing_high,  # 0%
+                'level_236': swing_high - (diff * 0.236),  # 23.6%
+                'level_382': swing_high - (diff * 0.382),  # 38.2%
+                'level_500': swing_high - (diff * 0.500),  # 50%
+                'level_618': swing_high - (diff * 0.618),  # 61.8%
+                'level_786': swing_high - (diff * 0.786),  # 78.6%
+                'level_100': swing_low  # 100%
+            }
+            
+            logger.debug(f"Calculated Fibonacci levels: High={swing_high:.2f}, Low={swing_low:.2f}")
+            return levels
+            
+        except Exception as e:
+            logger.error(f"Error calculating Fibonacci levels: {e}")
+            return {}
+    
+    @staticmethod
+    def identify_support_resistance(
+        data: pd.DataFrame,
+        lookback: int = 100,
+        tolerance_percent: float = 0.3
+    ) -> dict:
+        """
+        Identify support and resistance levels based on price touches.
+        
+        Args:
+            data: DataFrame with OHLC data
+            lookback: Number of candles to analyze
+            tolerance_percent: Tolerance for grouping nearby levels (%)
+            
+        Returns:
+            Dictionary with support and resistance levels
+        """
+        try:
+            if len(data) < lookback:
+                logger.warning(f"Insufficient data for S/R identification ({len(data)} < {lookback})")
+                return {'support': [], 'resistance': []}
+            
+            recent = data.tail(lookback)
+            
+            # Find local highs and lows
+            highs = []
+            lows = []
+            
+            for i in range(1, len(recent) - 1):
+                # Local high
+                if recent.iloc[i]['high'] > recent.iloc[i-1]['high'] and \
+                   recent.iloc[i]['high'] > recent.iloc[i+1]['high']:
+                    highs.append(recent.iloc[i]['high'])
+                
+                # Local low
+                if recent.iloc[i]['low'] < recent.iloc[i-1]['low'] and \
+                   recent.iloc[i]['low'] < recent.iloc[i+1]['low']:
+                    lows.append(recent.iloc[i]['low'])
+            
+            # Group nearby levels using tolerance
+            def group_levels(levels, tolerance_pct):
+                if not levels:
+                    return []
+                
+                levels = sorted(levels)
+                grouped = []
+                current_group = [levels[0]]
+                
+                for level in levels[1:]:
+                    # Check if within tolerance of current group average
+                    group_avg = sum(current_group) / len(current_group)
+                    tolerance = group_avg * (tolerance_pct / 100)
+                    
+                    if abs(level - group_avg) <= tolerance:
+                        current_group.append(level)
+                    else:
+                        # Start new group
+                        grouped.append(sum(current_group) / len(current_group))
+                        current_group = [level]
+                
+                # Add last group
+                if current_group:
+                    grouped.append(sum(current_group) / len(current_group))
+                
+                return grouped
+            
+            support_levels = group_levels(lows, tolerance_percent)
+            resistance_levels = group_levels(highs, tolerance_percent)
+            
+            logger.debug(f"Identified {len(support_levels)} support and {len(resistance_levels)} resistance levels")
+            
+            return {
+                'support': support_levels,
+                'resistance': resistance_levels,
+                'support_count': len(support_levels),
+                'resistance_count': len(resistance_levels)
+            }
+            
+        except Exception as e:
+            logger.error(f"Error identifying support/resistance levels: {e}")
+            return {'support': [], 'resistance': []}
+    
+    @staticmethod
+    def calculate_swing_points(
+        data: pd.DataFrame,
+        lookback: int = 50
+    ) -> Tuple[List[float], List[float]]:
+        """
+        Identify swing highs and lows over a lookback period.
+        
+        Args:
+            data: DataFrame with OHLC data
+            lookback: Number of candles to analyze
+            
+        Returns:
+            Tuple of (swing_highs, swing_lows) lists
+        """
+        try:
+            if len(data) < lookback:
+                logger.warning(f"Insufficient data for swing points ({len(data)} < {lookback})")
+                return [], []
+            
+            recent = data.tail(lookback)
+            
+            swing_highs = []
+            swing_lows = []
+            
+            for i in range(1, len(recent) - 1):
+                # Swing high (local maximum)
+                if recent.iloc[i]['high'] > recent.iloc[i-1]['high'] and \
+                   recent.iloc[i]['high'] > recent.iloc[i+1]['high']:
+                    swing_highs.append(recent.iloc[i]['high'])
+                
+                # Swing low (local minimum)
+                if recent.iloc[i]['low'] < recent.iloc[i-1]['low'] and \
+                   recent.iloc[i]['low'] < recent.iloc[i+1]['low']:
+                    swing_lows.append(recent.iloc[i]['low'])
+            
+            logger.debug(f"Identified {len(swing_highs)} swing highs and {len(swing_lows)} swing lows")
+            
+            return swing_highs, swing_lows
+            
+        except Exception as e:
+            logger.error(f"Error calculating swing points: {e}")
+            return [], []

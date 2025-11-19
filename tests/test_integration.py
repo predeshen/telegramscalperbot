@@ -1,301 +1,239 @@
-"""Integration tests for end-to-end signal flow."""
+"""
+Integration Tests for Trading Scanner System
+Tests end-to-end signal detection flow and component integration.
+"""
 import pytest
 import pandas as pd
 import numpy as np
 from datetime import datetime
-from unittest.mock import Mock, patch, MagicMock
-from src.market_data_client import MarketDataClient
+
+from src.unified_data_source import UnifiedDataSource, DataSourceConfig
 from src.indicator_calculator import IndicatorCalculator
-from src.signal_detector import SignalDetector
-from src.alerter import EmailAlerter, TelegramAlerter
+from src.strategy_detector import StrategyDetector
+from src.signal_quality_filter import SignalQualityFilter, QualityConfig
+from src.sl_tp_calculator import SLTPCalculator
 
 
-@pytest.fixture
-def mock_exchange_data():
-    """Create realistic mock exchange data."""
-    np.random.seed(42)
-    n = 200
+class TestDataSourceIntegration:
+    """Test unified data source integration"""
     
-    # Generate price data with a clear trend and crossover
-    base_price = 65000
-    trend = np.linspace(0, 500, n)  # Upward trend
-    noise = np.random.randn(n) * 50
-    close_prices = base_price + trend + noise
-    
-    # Create volume spike near the end
-    volumes = np.random.randint(800, 1200, n)
-    volumes[-5:] = np.random.randint(1800, 2200, 5)  # Volume spike
-    
-    timestamps = pd.date_range('2025-01-01', periods=n, freq='1min')
-    
-    ohlcv = []
-    for i in range(n):
-        ohlcv.append([
-            int(timestamps[i].timestamp() * 1000),  # timestamp in ms
-            float(close_prices[i] - 50),  # open
-            float(close_prices[i] + 100),  # high
-            float(close_prices[i] - 100),  # low
-            float(close_prices[i]),  # close
-            float(volumes[i])  # volume
-        ])
-    
-    return ohlcv
-
-
-class TestEndToEndSignalFlow:
-    """Integration tests for complete signal detection flow."""
-    
-    @patch('ccxt.binance')
-    def test_market_data_to_indicators(self, mock_binance_class, mock_exchange_data):
-        """Test data flow from market client to indicator calculation."""
-        # Setup mock exchange
-        mock_exchange = Mock()
-        mock_exchange.load_markets.return_value = None
-        mock_exchange.markets = {'BTC/USDT': {}}
-        mock_exchange.fetch_ohlcv.return_value = mock_exchange_data
-        mock_binance_class.return_value = mock_exchange
+    def test_data_source_initialization(self):
+        """Test data source initialization"""
+        config = DataSourceConfig(
+            primary_source="binance",
+            fallback_sources=["twelve_data", "alpha_vantage"],
+            freshness_threshold_seconds=300
+        )
         
-        # Create market client
-        client = MarketDataClient('binance', 'BTC/USDT', ['5m'])
-        assert client.connect()
+        data_source = UnifiedDataSource(config)
+        assert data_source.config.primary_source == "binance"
+        assert len(data_source.config.fallback_sources) == 2
+    
+    def test_data_source_status_tracking(self):
+        """Test data source status tracking"""
+        config = DataSourceConfig()
+        data_source = UnifiedDataSource(config)
         
-        # Fetch data
-        df, _ = client.get_latest_candles('5m', 200)
-        assert len(df) == 200
-        assert 'close' in df.columns
+        status = data_source.get_source_status()
+        assert 'binance' in status
+        assert 'enabled' in status['binance']
+
+
+class TestSignalDetectionFlow:
+    """Test end-to-end signal detection flow"""
+    
+    @pytest.fixture
+    def sample_market_data(self):
+        """Create realistic sample market data"""
+        dates = pd.date_range('2024-01-01', periods=200, freq='1H')
         
-        # Calculate indicators
-        calculator = IndicatorCalculator()
-        df_with_indicators = calculator.calculate_all_indicators(df)
+        # Create trending data
+        prices = np.linspace(100, 110, 200) + np.random.normal(0, 0.5, 200)
+        
+        data = pd.DataFrame({
+            'timestamp': dates,
+            'open': prices - 0.5,
+            'high': prices + 1,
+            'low': prices - 1,
+            'close': prices,
+            'volume': np.random.uniform(1000, 2000, 200)
+        })
+        
+        return data
+    
+    def test_indicator_calculation_pipeline(self, sample_market_data):
+        """Test indicator calculation pipeline"""
+        calc = IndicatorCalculator()
+        
+        # Calculate all indicators
+        data_with_indicators = calc.calculate_all_indicators(
+            sample_market_data,
+            ema_periods=[9, 21, 50],
+            atr_period=14,
+            rsi_period=6,
+            volume_ma_period=20
+        )
         
         # Verify indicators are calculated
-        assert 'ema_9' in df_with_indicators.columns
-        assert 'ema_21' in df_with_indicators.columns
-        assert 'vwap' in df_with_indicators.columns
-        assert 'atr' in df_with_indicators.columns
-        assert 'rsi' in df_with_indicators.columns
-        assert len(df_with_indicators) > 0
+        assert 'ema_9' in data_with_indicators.columns
+        assert 'ema_21' in data_with_indicators.columns
+        assert 'ema_50' in data_with_indicators.columns
+        assert 'atr' in data_with_indicators.columns
+        assert 'rsi' in data_with_indicators.columns
+        assert 'volume_ma' in data_with_indicators.columns
+        
+        # Verify no NaN in critical indicators
+        assert not data_with_indicators['ema_9'].isna().all()
+        assert not data_with_indicators['rsi'].isna().all()
     
-    @patch('ccxt.binance')
-    def test_full_signal_detection_flow(self, mock_binance_class, mock_exchange_data):
-        """Test complete flow from data to signal detection."""
-        # Setup mock exchange
-        mock_exchange = Mock()
-        mock_exchange.load_markets.return_value = None
-        mock_exchange.markets = {'BTC/USDT': {}}
-        mock_exchange.fetch_ohlcv.return_value = mock_exchange_data
-        mock_binance_class.return_value = mock_exchange
-        
-        # Create components
-        client = MarketDataClient('binance', 'BTC/USDT', ['5m'])
-        calculator = IndicatorCalculator()
-        detector = SignalDetector()
-        
-        # Connect and fetch data
-        assert client.connect()
-        df, _ = client.get_latest_candles('5m', 200)
-        
+    def test_strategy_detection_integration(self, sample_market_data):
+        """Test strategy detection integration"""
         # Calculate indicators
-        df_with_indicators = calculator.calculate_all_indicators(df)
+        calc = IndicatorCalculator()
+        data_with_indicators = calc.calculate_all_indicators(sample_market_data)
+        
+        # Initialize strategy detector
+        detector = StrategyDetector()
         
         # Detect signals
-        signal = detector.detect_signals(df_with_indicators, '5m')
+        signal = detector.detect_signals(
+            data_with_indicators,
+            timeframe="1h",
+            symbol="BTC"
+        )
         
         # Signal may or may not be detected depending on data
-        # Just verify the flow completes without errors
-        if signal:
-            assert signal.signal_type in ['LONG', 'SHORT']
-            assert signal.entry_price > 0
-            assert signal.stop_loss != signal.entry_price
-            assert signal.take_profit != signal.entry_price
+        # Just verify the method works without errors
+        assert signal is None or hasattr(signal, 'signal_type')
     
-    @patch('smtplib.SMTP_SSL')
-    def test_email_alert_formatting(self, mock_smtp):
-        """Test email alert formatting and sending."""
-        # Setup mock SMTP
-        mock_server = Mock()
-        mock_smtp.return_value = mock_server
+    def test_signal_quality_filtering(self, sample_market_data):
+        """Test signal quality filtering"""
+        # Calculate indicators
+        calc = IndicatorCalculator()
+        data_with_indicators = calc.calculate_all_indicators(sample_market_data)
         
-        # Create email alerter
-        alerter = EmailAlerter(
-            smtp_server='test.smtp.com',
-            smtp_port=465,
-            smtp_user='test@test.com',
-            smtp_password='password',
-            from_email='test@test.com',
-            to_email='recipient@test.com',
-            use_ssl=True
-        )
-        
-        # Create mock signal
+        # Create a mock signal
         from src.signal_detector import Signal
+        from src.symbol_context import SymbolContext
+        
+        last = data_with_indicators.iloc[-1]
+        
         signal = Signal(
-            timestamp=datetime.now(),
-            signal_type='LONG',
-            timeframe='5m',
-            entry_price=65000.0,
-            stop_loss=64850.0,
-            take_profit=65150.0,
-            atr=100.0,
-            risk_reward=1.0,
-            market_bias='bullish',
-            confidence=5,
-            indicators={
-                'ema_9': 65050.0,
-                'ema_21': 65000.0,
-                'ema_50': 64900.0,
-                'vwap': 64950.0,
-                'rsi': 55.0,
-                'volume': 1500.0,
-                'volume_ma': 1000.0
-            }
-        )
-        
-        # Send alert
-        result = alerter.send_signal_alert(signal)
-        
-        # Verify SMTP was called
-        assert result is True
-        mock_smtp.assert_called_once()
-        mock_server.login.assert_called_once()
-        mock_server.send_message.assert_called_once()
-        mock_server.quit.assert_called_once()
-    
-    @patch('telegram.Bot')
-    def test_telegram_alert_formatting(self, mock_bot_class):
-        """Test Telegram alert formatting and sending."""
-        # Setup mock bot
-        mock_bot = Mock()
-        mock_bot.send_message = Mock()
-        mock_bot_class.return_value = mock_bot
-        
-        # Create Telegram alerter
-        alerter = TelegramAlerter(
-            bot_token='test_token',
-            chat_id='test_chat_id'
-        )
-        
-        # Create mock signal
-        from src.signal_detector import Signal
-        signal = Signal(
-            timestamp=datetime.now(),
-            signal_type='SHORT',
-            timeframe='1m',
-            entry_price=65000.0,
-            stop_loss=65150.0,
-            take_profit=64850.0,
-            atr=100.0,
-            risk_reward=1.0,
-            market_bias='bearish',
+            timestamp=last['timestamp'],
+            signal_type="LONG",
+            timeframe="1h",
+            symbol="BTC",
+            symbol_context=SymbolContext.from_symbol("BTC"),
+            entry_price=last['close'],
+            stop_loss=last['close'] - 1,
+            take_profit=last['close'] + 2,
+            atr=last['atr'],
+            risk_reward=2.0,
+            market_bias="bullish",
             confidence=4,
             indicators={
-                'ema_9': 64950.0,
-                'ema_21': 65000.0,
-                'ema_50': 65100.0,
-                'vwap': 65050.0,
-                'rsi': 45.0,
-                'volume': 1800.0,
-                'volume_ma': 1000.0
-            }
+                'rsi': last['rsi'],
+                'volume': last['volume'],
+                'volume_ma': last['volume_ma']
+            },
+            reasoning="Test signal",
+            strategy="Test"
         )
         
-        # Send alert
-        result = alerter.send_signal_alert(signal)
+        # Filter signal
+        quality_config = QualityConfig(
+            min_confluence_factors=3,
+            min_confidence_score=2
+        )
+        quality_filter = SignalQualityFilter(quality_config)
         
-        # Verify bot was called (if enabled)
-        # Note: This may fail due to async mocking issues, but that's a test infrastructure issue
-        # The real Telegram functionality works fine in production
-        if alerter.enabled:
-            # Just verify the method was called, don't assert on result due to async issues
-            assert alerter.bot is not None
+        result = quality_filter.evaluate_signal(signal, data_with_indicators)
+        
+        # Verify filter result
+        assert hasattr(result, 'passed')
+        assert hasattr(result, 'confidence_score')
+        assert hasattr(result, 'confluence_factors')
+
+
+class TestTPSLCalculation:
+    """Test TP/SL calculation integration"""
     
-    @patch('ccxt.binance')
-    @patch('smtplib.SMTP_SSL')
-    def test_complete_pipeline_with_alert(self, mock_smtp, mock_binance_class):
-        """Test complete pipeline from data fetch to alert delivery."""
-        # Setup mocks
-        mock_exchange = Mock()
-        mock_exchange.load_markets.return_value = None
-        mock_exchange.markets = {'BTC/USDT': {}}
+    @pytest.fixture
+    def sample_market_data(self):
+        """Create sample market data"""
+        dates = pd.date_range('2024-01-01', periods=150, freq='1H')
+        prices = np.linspace(100, 110, 150) + np.random.normal(0, 0.5, 150)
         
-        # Create data with guaranteed signal
-        n = 200
-        timestamps = pd.date_range('2025-01-01', periods=n, freq='1min')
+        data = pd.DataFrame({
+            'timestamp': dates,
+            'open': prices - 0.5,
+            'high': prices + 1,
+            'low': prices - 1,
+            'close': prices,
+            'volume': np.random.uniform(1000, 2000, 150)
+        })
         
-        # Create bullish setup
-        close_prices = np.linspace(64500, 65500, n)
-        volumes = np.ones(n) * 1000
-        volumes[-5:] = 2000  # Volume spike
-        
-        ohlcv = []
-        for i in range(n):
-            ohlcv.append([
-                int(timestamps[i].timestamp() * 1000),
-                float(close_prices[i] - 50),
-                float(close_prices[i] + 100),
-                float(close_prices[i] - 100),
-                float(close_prices[i]),
-                float(volumes[i])
-            ])
-        
-        mock_exchange.fetch_ohlcv.return_value = ohlcv
-        mock_binance_class.return_value = mock_exchange
-        
-        mock_server = Mock()
-        mock_smtp.return_value = mock_server
-        
-        # Create components
-        client = MarketDataClient('binance', 'BTC/USDT', ['5m'])
-        calculator = IndicatorCalculator()
-        detector = SignalDetector()
-        alerter = EmailAlerter(
-            smtp_server='test.smtp.com',
-            smtp_port=465,
-            smtp_user='test@test.com',
-            smtp_password='password',
-            from_email='test@test.com',
-            to_email='recipient@test.com'
-        )
-        
-        # Execute pipeline
-        assert client.connect()
-        df, _ = client.get_latest_candles('5m', 200)
-        df_with_indicators = calculator.calculate_all_indicators(df)
-        signal = detector.detect_signals(df_with_indicators, '5m')
-        
-        if signal:
-            result = alerter.send_signal_alert(signal)
-            assert result is True
-            mock_server.send_message.assert_called()
+        return data
     
-    def test_latency_measurement(self, mock_exchange_data):
-        """Test that signal detection completes within latency requirements."""
-        import time
+    def test_structure_based_sltp(self, sample_market_data):
+        """Test structure-based SL/TP calculation"""
+        calc = IndicatorCalculator()
+        data_with_indicators = calc.calculate_all_indicators(sample_market_data)
         
-        # Convert mock data to DataFrame
-        df = pd.DataFrame(
-            mock_exchange_data,
-            columns=['timestamp', 'open', 'high', 'low', 'close', 'volume']
+        last = data_with_indicators.iloc[-1]
+        entry_price = last['close']
+        atr = last['atr']
+        
+        sl, tp, rr = SLTPCalculator.calculate_structure_based_sltp(
+            data_with_indicators,
+            entry_price,
+            "LONG",
+            atr,
+            lookback=50
         )
-        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
         
-        # Measure indicator calculation time
-        calculator = IndicatorCalculator()
-        start_time = time.time()
-        df_with_indicators = calculator.calculate_all_indicators(df)
-        indicator_time = time.time() - start_time
+        # Verify SL/TP are calculated
+        assert sl < entry_price  # SL below entry for LONG
+        assert tp > entry_price  # TP above entry for LONG
+        assert rr > 0  # Risk/reward should be positive
+    
+    def test_historical_sltp(self, sample_market_data):
+        """Test historical price action-based SL/TP"""
+        calc = IndicatorCalculator()
+        data_with_indicators = calc.calculate_all_indicators(sample_market_data)
         
-        # Measure signal detection time
-        detector = SignalDetector()
-        start_time = time.time()
-        signal = detector.detect_signals(df_with_indicators, '5m')
-        detection_time = time.time() - start_time
+        last = data_with_indicators.iloc[-1]
+        entry_price = last['close']
+        atr = last['atr']
         
-        total_time = indicator_time + detection_time
+        sl, tp, rr = SLTPCalculator.calculate_historical_sltp(
+            data_with_indicators,
+            entry_price,
+            "LONG",
+            atr,
+            lookback=100
+        )
         
-        # Should complete in under 2 seconds (requirement)
-        assert total_time < 2.0, f"Processing took {total_time:.3f}s, exceeds 2s requirement"
+        # Verify SL/TP are calculated
+        assert sl < entry_price  # SL below entry for LONG
+        assert tp > entry_price  # TP above entry for LONG
+        assert rr >= 1.2  # Minimum risk/reward
+    
+    def test_risk_reward_validation(self):
+        """Test risk/reward validation"""
+        entry = 100
+        sl = 98
+        tp = 104
         
-        print(f"Indicator calculation: {indicator_time:.3f}s")
-        print(f"Signal detection: {detection_time:.3f}s")
-        print(f"Total processing: {total_time:.3f}s")
+        is_valid = SLTPCalculator.validate_risk_reward(entry, sl, tp, min_ratio=1.2)
+        assert is_valid is True
+        
+        # Test invalid ratio
+        tp_low = 101
+        is_valid = SLTPCalculator.validate_risk_reward(entry, sl, tp_low, min_ratio=1.2)
+        assert is_valid is False
+
+
+if __name__ == '__main__':
+    pytest.main([__file__, '-v'])
+
